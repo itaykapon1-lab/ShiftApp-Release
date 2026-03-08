@@ -21,3 +21,4 @@ pandas==2.3.2
 
 # Production server (required for deployment)
 gunicorn>=21.0.0
+itsdangerous>=2.1.2
