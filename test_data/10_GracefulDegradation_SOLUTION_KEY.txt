@@ -1,0 +1,94 @@
+========================================================================
+  PLANTED SOLUTION KEY — Pillar 3 — Graceful Degradation
+  This file proves the Excel dataset is mathematically solvable.
+========================================================================
+
+Shift: D_FRI_AM  (Friday 07:00-13:00)
+  -> DC_03  (skills: Chef, Cook)
+  -> DW_03  (skills: Waiter)
+
+Shift: D_FRI_NT  (Friday 21:00-27:00)
+  -> DD_02  (skills: Dishwasher)
+
+Shift: D_FRI_PM  (Friday 14:00-20:00)
+  -> DC_04  (skills: Chef, Cook)
+  -> DW_04  (skills: Waiter)
+
+Shift: D_MON_AM  (Monday 07:00-13:00)
+  -> DC_03  (skills: Chef, Cook)
+  -> DW_03  (skills: Waiter)
+
+Shift: D_MON_NT  (Monday 21:00-27:00)
+  -> DD_02  (skills: Dishwasher)
+
+Shift: D_MON_PM  (Monday 14:00-20:00)
+  -> DC_04  (skills: Chef, Cook)
+  -> DW_04  (skills: Waiter)
+
+Shift: D_SAT_AM  (Saturday 07:00-13:00)
+  -> DC_01  (skills: Chef, Cook)
+  -> DW_01  (skills: Waiter)
+
+Shift: D_SAT_NT  (Saturday 21:00-27:00)
+  -> DD_01  (skills: Dishwasher)
+
+Shift: D_SAT_PM  (Saturday 14:00-20:00)
+  -> DC_02  (skills: Chef, Cook)
+  -> DW_02  (skills: Waiter)
+
+Shift: D_SUN_AM  (Sunday 07:00-13:00)
+  -> DC_01  (skills: Chef, Cook)
+  -> DW_01  (skills: Waiter)
+
+Shift: D_SUN_NT  (Sunday 21:00-27:00)
+  -> DD_01  (skills: Dishwasher)
+
+Shift: D_SUN_PM  (Sunday 14:00-20:00)
+  -> DC_02  (skills: Chef, Cook)
+  -> DW_02  (skills: Waiter)
+
+Shift: D_THU_AM  (Thursday 07:00-13:00)
+  -> DC_01  (skills: Chef, Cook)
+  -> DW_01  (skills: Waiter)
+
+Shift: D_THU_NT  (Thursday 21:00-27:00)
+  -> DD_01  (skills: Dishwasher)
+
+Shift: D_THU_PM  (Thursday 14:00-20:00)
+  -> DC_02  (skills: Chef, Cook)
+  -> DW_02  (skills: Waiter)
+
+Shift: D_TUE_AM  (Tuesday 07:00-13:00)
+  -> DC_01  (skills: Chef, Cook)
+  -> DW_01  (skills: Waiter)
+
+Shift: D_TUE_NT  (Tuesday 21:00-27:00)
+  -> DD_01  (skills: Dishwasher)
+
+Shift: D_TUE_PM  (Tuesday 14:00-20:00)
+  -> DC_02  (skills: Chef, Cook)
+  -> DW_02  (skills: Waiter)
+
+Shift: D_WED_AM  (Wednesday 07:00-13:00)
+  -> DC_03  (skills: Chef, Cook)
+  -> DW_03  (skills: Waiter)
+
+Shift: D_WED_NT  (Wednesday 21:00-27:00)
+  -> DD_02  (skills: Dishwasher)
+
+Shift: D_WED_PM  (Wednesday 14:00-20:00)
+  -> DC_04  (skills: Chef, Cook)
+  -> DW_04  (skills: Waiter)
+
+----------------------------------------
+WORKER HOUR TOTALS:
+  DC_01: 24.0h / 30h max
+  DC_02: 24.0h / 30h max
+  DC_03: 18.0h / 30h max
+  DC_04: 18.0h / 30h max
+  DD_01: 24.0h / 30h max
+  DD_02: 18.0h / 30h max
+  DW_01: 24.0h / 30h max
+  DW_02: 24.0h / 30h max
+  DW_03: 18.0h / 30h max
+  DW_04: 18.0h / 30h max

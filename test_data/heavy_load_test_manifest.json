@@ -1,0 +1,23 @@
+{
+  "generated_scenarios": [
+    {
+      "file": "test_data\\8_MultiConstraint_HeavyLoad.xlsx",
+      "scenario_name": "Multi-Constraint Heavy Load (Planted Solution)",
+      "expected_outcome": "Optimal Solution",
+      "logic_why": "200 workers (60 golden + 140 noise), 45 shifts (28 core + 17 noise). All 9 constraint types active. Planted golden schedule verified in memory before Excel generation. Solution key artifact provided."
+    },
+    {
+      "file": "test_data\\9_CascadingInfeasibility.xlsx",
+      "scenario_name": "Cascading Infeasibility Trap",
+      "expected_outcome": "Infeasible",
+      "logic_why": "3 SeniorChef:8 workers must cover 10 weekend shifts of 6h each. Max Hours=20 (HARD) + Avoid Consecutive 14h (HARD rest implicit in overlap) + overlapping shift windows = max 9 usable slots for 10 shifts \u2192 INFEASIBLE."
+    },
+    {
+      "file": "test_data\\10_GracefulDegradation.xlsx",
+      "scenario_name": "Graceful Degradation (Planted Solution)",
+      "expected_outcome": "Optimal Solution",
+      "logic_why": "130 workers (30 golden + 100 noise), 29 shifts (21 core + 8 noise). Max Hours=30 (HARD). All workers mark shifts as '!' (negative pref). Only #3 priority task options satisfiable. SOFT mutual exclusions and co-locations guaranteed violated. Expected deep negative score."
+    }
+  ],
+  "count": 3
+}

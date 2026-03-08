@@ -1,0 +1,168 @@
+{
+  "generated_scenarios": [
+    {
+      "file": "test_data\\1_MaxHours_Test.xlsx",
+      "scenario_name": "Isolation - Max Hours Cap",
+      "expected_outcome": "Optimal Solution",
+      "logic_why": "Main worker has Max Hours=20 but target core demand is 30 hours (3x10h Chef shifts). Noise workers are blocked on core days and lack Chef skill, so they cannot solve core demand. Solver should keep hard worker max-hours integrity and use backup Chef or leave demand uncovered if needed.",
+      "scale": {
+        "total_workers": 200,
+        "total_shifts": 20
+      },
+      "guardrails": {
+        "blocked_days": [
+          "Monday",
+          "Tuesday",
+          "Wednesday"
+        ],
+        "banned_skills_for_noise": [
+          "Chef"
+        ]
+      },
+      "generated_counts": {
+        "workers": 200,
+        "shifts": 20,
+        "constraints": 0
+      }
+    },
+    {
+      "file": "test_data\\2_SkillLevel_Test.xlsx",
+      "scenario_name": "Isolation - Skill Level Threshold",
+      "expected_outcome": "Optimal Solution",
+      "logic_why": "Core shift requires Chef:5. Worker A has Chef:3 and is disqualified by eligibility filtering. Worker B has Chef:5 and remains the only valid core candidate. Noise workers are blocked on Tuesday and carry no Chef skill.",
+      "scale": {
+        "total_workers": 200,
+        "total_shifts": 20
+      },
+      "guardrails": {
+        "blocked_days": [
+          "Tuesday"
+        ],
+        "banned_skills_for_noise": [
+          "Chef"
+        ]
+      },
+      "generated_counts": {
+        "workers": 200,
+        "shifts": 20,
+        "constraints": 0
+      }
+    },
+    {
+      "file": "test_data\\3_Availability_Test.xlsx",
+      "scenario_name": "Isolation - Availability Hard Gate",
+      "expected_outcome": "Optimal Solution",
+      "logic_why": "Target worker is OFF on Tuesday, so availability containment check rejects assignment. Only the Tuesday-available waiter can cover the core shift. Noise workers are blocked on Tuesday and also avoid Waiter skill.",
+      "scale": {
+        "total_workers": 200,
+        "total_shifts": 20
+      },
+      "guardrails": {
+        "blocked_days": [
+          "Tuesday"
+        ],
+        "banned_skills_for_noise": [
+          "Waiter"
+        ]
+      },
+      "generated_counts": {
+        "workers": 200,
+        "shifts": 20,
+        "constraints": 0
+      }
+    },
+    {
+      "file": "test_data\\4_HardVsSoft_Tradeoff_Test.xlsx",
+      "scenario_name": "Trade-off - Hard Constraint vs Soft Preference",
+      "expected_outcome": "Infeasible",
+      "logic_why": "Core shift needs 2 Host:5 workers and only Alice/Bob can satisfy this role on Friday. Hard Mutual Exclusion forbids them together in the same shift, so coverage cannot be met. Soft Co-Location cannot override a hard feasibility rule.",
+      "scale": {
+        "total_workers": 200,
+        "total_shifts": 20
+      },
+      "guardrails": {
+        "blocked_days": [
+          "Friday"
+        ],
+        "banned_skills_for_noise": [
+          "Host"
+        ]
+      },
+      "generated_counts": {
+        "workers": 200,
+        "shifts": 20,
+        "constraints": 2
+      }
+    },
+    {
+      "file": "test_data\\5_CostVsPreference_Tradeoff_Test.xlsx",
+      "scenario_name": "Trade-off - Cost vs Preference",
+      "expected_outcome": "Optimal Solution",
+      "logic_why": "Both core candidates satisfy hard eligibility. Cheap worker has explicit negative preference ('!'), expensive worker has positive preference ('*'). Current solver objective is preference-driven, not wage-driven, so selection should consistently follow preference coefficient impact.",
+      "scale": {
+        "total_workers": 200,
+        "total_shifts": 20
+      },
+      "guardrails": {
+        "blocked_days": [
+          "Thursday"
+        ],
+        "banned_skills_for_noise": [
+          "Barista"
+        ]
+      },
+      "generated_counts": {
+        "workers": 200,
+        "shifts": 20,
+        "constraints": 0
+      }
+    },
+    {
+      "file": "test_data\\6_Impossible_MutualExclusion_Test.xlsx",
+      "scenario_name": "Diagnostics - Impossible Mutual Exclusion",
+      "expected_outcome": "Infeasible",
+      "logic_why": "Core shift requires two Guard workers, but the only two Guards are hard-banned from working together. Coverage plus mutual exclusion creates an irreconcilable hard conflict. Noise workers are blocked on Saturday and have no Guard skill.",
+      "scale": {
+        "total_workers": 200,
+        "total_shifts": 20
+      },
+      "guardrails": {
+        "blocked_days": [
+          "Saturday"
+        ],
+        "banned_skills_for_noise": [
+          "Guard"
+        ]
+      },
+      "generated_counts": {
+        "workers": 200,
+        "shifts": 20,
+        "constraints": 1
+      }
+    },
+    {
+      "file": "test_data\\7_Impossible_SkillGap_Test.xlsx",
+      "scenario_name": "Diagnostics - Impossible Skill Gap",
+      "expected_outcome": "Infeasible",
+      "logic_why": "Core shift requires NuclearPhysicist:10 and no worker in the entire pool has that skill. This should trigger skill-gap infeasibility diagnostics before or during feasibility analysis. Noise workers are blocked on Monday and explicitly prevented from carrying NuclearPhysicist skill.",
+      "scale": {
+        "total_workers": 200,
+        "total_shifts": 20
+      },
+      "guardrails": {
+        "blocked_days": [
+          "Monday"
+        ],
+        "banned_skills_for_noise": [
+          "Nuclearphysicist"
+        ]
+      },
+      "generated_counts": {
+        "workers": 200,
+        "shifts": 20,
+        "constraints": 0
+      }
+    }
+  ],
+  "count": 7
+}

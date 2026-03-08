@@ -1,0 +1,23 @@
+# Core Framework
+fastapi==0.128.0
+uvicorn[standard]==0.40.0
+pydantic==2.12.5
+pydantic-settings==2.12.0
+
+# Database
+sqlalchemy==2.0.45
+# SQLite is built-in, no extra driver needed
+
+# PostgreSQL driver (required for production on Render.com)
+psycopg2-binary>=2.9.0
+
+# Solver
+ortools==9.14.6206
+
+# File handling
+python-multipart==0.0.21
+openpyxl==3.1.5
+pandas==2.3.2
+
+# Production server (required for deployment)
+gunicorn>=21.0.0

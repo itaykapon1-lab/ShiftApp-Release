@@ -1,0 +1,170 @@
+========================================================================
+  PLANTED SOLUTION KEY — Pillar 1 — Multi-Constraint Heavy Load
+  This file proves the Excel dataset is mathematically solvable.
+========================================================================
+
+Shift: FRI_EVE  (Friday 17:00-23:00)
+  -> GC_06  (skills: Chef)
+  -> GW_05  (skills: Waiter)
+  -> GW_06  (skills: Waiter)
+  -> GB_03  (skills: Bartender)
+
+Shift: FRI_LUN  (Friday 12:30-16:30)
+  -> GC_05  (skills: Chef)
+  -> GW_03  (skills: Waiter)
+  -> GW_04  (skills: Waiter)
+  -> GD_03  (skills: Dishwasher)
+
+Shift: FRI_MOR  (Friday 06:00-12:00)
+  -> GC_04  (skills: Chef)
+  -> GW_01  (skills: Waiter)
+  -> GW_02  (skills: Waiter)
+
+Shift: FRI_NGT  (Friday 23:30-05:30)
+  -> GD_04  (skills: Dishwasher)
+
+Shift: MON_EVE  (Monday 17:00-23:00)
+  -> GC_06  (skills: Chef)
+  -> GW_01  (skills: Waiter)
+  -> GW_02  (skills: Waiter)
+  -> GB_02  (skills: Bartender)
+
+Shift: MON_LUN  (Monday 12:30-16:30)
+  -> GC_05  (skills: Chef)
+  -> GW_09  (skills: Waiter)
+  -> GW_10  (skills: Waiter)
+  -> GD_03  (skills: Dishwasher)
+
+Shift: MON_MOR  (Monday 06:00-12:00)
+  -> GC_04  (skills: Chef)
+  -> GW_07  (skills: Waiter)
+  -> GW_08  (skills: Waiter)
+
+Shift: MON_NGT  (Monday 23:30-05:30)
+  -> GD_04  (skills: Dishwasher)
+
+Shift: SAT_EVE  (Saturday 17:00-23:00)
+  -> GC_03  (skills: Chef)
+  -> GW_01  (skills: Waiter)
+  -> GW_02  (skills: Waiter)
+  -> GB_01  (skills: Bartender)
+
+Shift: SAT_LUN  (Saturday 12:30-16:30)
+  -> GC_02  (skills: Chef)
+  -> GW_09  (skills: Waiter)
+  -> GW_10  (skills: Waiter)
+  -> GD_01  (skills: Dishwasher)
+
+Shift: SAT_MOR  (Saturday 06:00-12:00)
+  -> GC_01  (skills: Chef)
+  -> GW_07  (skills: Waiter)
+  -> GW_08  (skills: Waiter)
+
+Shift: SAT_NGT  (Saturday 23:30-05:30)
+  -> GD_02  (skills: Dishwasher)
+
+Shift: SUN_EVE  (Sunday 17:00-23:00)
+  -> GC_03  (skills: Chef)
+  -> GW_05  (skills: Waiter)
+  -> GW_06  (skills: Waiter)
+  -> GB_01  (skills: Bartender)
+
+Shift: SUN_LUN  (Sunday 12:30-16:30)
+  -> GC_02  (skills: Chef)
+  -> GW_03  (skills: Waiter)
+  -> GW_04  (skills: Waiter)
+  -> GD_01  (skills: Dishwasher)
+
+Shift: SUN_MOR  (Sunday 06:00-12:00)
+  -> GC_01  (skills: Chef)
+  -> GW_01  (skills: Waiter)
+  -> GW_02  (skills: Waiter)
+
+Shift: SUN_NGT  (Sunday 23:30-05:30)
+  -> GD_02  (skills: Dishwasher)
+
+Shift: THU_EVE  (Thursday 17:00-23:00)
+  -> GC_03  (skills: Chef)
+  -> GW_09  (skills: Waiter)
+  -> GW_10  (skills: Waiter)
+  -> GB_02  (skills: Bartender)
+
+Shift: THU_LUN  (Thursday 12:30-16:30)
+  -> GC_02  (skills: Chef)
+  -> GW_07  (skills: Waiter)
+  -> GW_08  (skills: Waiter)
+  -> GD_01  (skills: Dishwasher)
+
+Shift: THU_MOR  (Thursday 06:00-12:00)
+  -> GC_01  (skills: Chef)
+  -> GW_05  (skills: Waiter)
+  -> GW_06  (skills: Waiter)
+
+Shift: THU_NGT  (Thursday 23:30-05:30)
+  -> GD_02  (skills: Dishwasher)
+
+Shift: TUE_EVE  (Tuesday 17:00-23:00)
+  -> GC_03  (skills: Chef)
+  -> GW_07  (skills: Waiter)
+  -> GW_08  (skills: Waiter)
+  -> GB_03  (skills: Bartender)
+
+Shift: TUE_LUN  (Tuesday 12:30-16:30)
+  -> GC_02  (skills: Chef)
+  -> GW_05  (skills: Waiter)
+  -> GW_06  (skills: Waiter)
+  -> GD_01  (skills: Dishwasher)
+
+Shift: TUE_MOR  (Tuesday 06:00-12:00)
+  -> GC_01  (skills: Chef)
+  -> GW_03  (skills: Waiter)
+  -> GW_04  (skills: Waiter)
+
+Shift: TUE_NGT  (Tuesday 23:30-05:30)
+  -> GD_02  (skills: Dishwasher)
+
+Shift: WED_EVE  (Wednesday 17:00-23:00)
+  -> GC_06  (skills: Chef)
+  -> GW_03  (skills: Waiter)
+  -> GW_04  (skills: Waiter)
+  -> GB_01  (skills: Bartender)
+
+Shift: WED_LUN  (Wednesday 12:30-16:30)
+  -> GC_05  (skills: Chef)
+  -> GW_01  (skills: Waiter)
+  -> GW_02  (skills: Waiter)
+  -> GD_03  (skills: Dishwasher)
+
+Shift: WED_MOR  (Wednesday 06:00-12:00)
+  -> GC_04  (skills: Chef)
+  -> GW_09  (skills: Waiter)
+  -> GW_10  (skills: Waiter)
+
+Shift: WED_NGT  (Wednesday 23:30-05:30)
+  -> GD_04  (skills: Dishwasher)
+
+----------------------------------------
+WORKER HOUR TOTALS:
+  GB_01: 18.0h / 40h max
+  GB_02: 12.0h / 40h max
+  GB_03: 12.0h / 40h max
+  GC_01: 24.0h / 36h max
+  GC_02: 16.0h / 36h max
+  GC_03: 24.0h / 36h max
+  GC_04: 18.0h / 36h max
+  GC_05: 12.0h / 36h max
+  GC_06: 18.0h / 36h max
+  GD_01: 16.0h / 40h max
+  GD_02: 24.0h / 40h max
+  GD_03: 12.0h / 40h max
+  GD_04: 18.0h / 40h max
+  GW_01: 28.0h / 40h max
+  GW_02: 28.0h / 40h max
+  GW_03: 20.0h / 40h max
+  GW_04: 20.0h / 40h max
+  GW_05: 22.0h / 40h max
+  GW_06: 22.0h / 40h max
+  GW_07: 22.0h / 40h max
+  GW_08: 22.0h / 40h max
+  GW_09: 20.0h / 40h max
+  GW_10: 20.0h / 40h max
