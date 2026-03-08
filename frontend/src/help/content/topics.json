@@ -1,0 +1,194 @@
+{
+  "version": "2026-03-06",
+  "topics": [
+    {
+      "id": "workers.overview",
+      "title": "Workers: Capacity and Eligibility",
+      "audience": "Scheduler users",
+      "sections": [
+        {
+          "id": "workers-identification",
+          "heading": "Worker Identification & Skills",
+          "body": "A worker needs a Name and an ID. Their abilities are defined by Skills, graded on a basic (1) to master (10) scale.\n* Example: A worker with 'Bartender: 7' can fulfill any bartending requirement of level 7 or lower.",
+          "tone": "info",
+          "calloutType": "info"
+        },
+        {
+          "id": "workers-availability",
+          "heading": "Availability Windows",
+          "body": "Time windows define exactly when a worker can be scheduled, formatted in 24-hour time (e.g., 08:00-16:00). Outside these windows, they cannot be assigned.\n* Example: '09:00-17:00' means the worker is strictly unavailable at 17:01.",
+          "tone": "guide",
+          "calloutType": "tip"
+        },
+        {
+          "id": "workers-preferences",
+          "heading": "Preferences & Limits",
+          "body": "Preferences (HIGH/LOW) impact the solver's score but do not prevent assignments. Min/Max hours define their workload boundaries across the scheduling period.\n* Example: Assigning a 'LOW' preference shift reduces the overall schedule quality score, but is still allowed if no other worker is available.",
+          "tone": "warning",
+          "calloutType": "warning"
+        }
+      ],
+      "relatedActions": [
+        "Add Worker",
+        "Edit Worker",
+        "Delete Worker"
+      ],
+      "glossaryTerms": [
+        "hard_constraint",
+        "soft_constraint",
+        "skill_level_threshold"
+      ],
+      "version": "1.1"
+    },
+    {
+      "id": "shifts.overview",
+      "title": "Shifts: Demand and Staffing Logic",
+      "audience": "Scheduler users",
+      "sections": [
+        {
+          "id": "shifts-defining",
+          "heading": "Defining the Shift",
+          "body": "Provide a Shift Name, Day of the Week, and Time boundaries using standard 24-hour format (e.g., 09:00-17:00).",
+          "tone": "info",
+          "calloutType": "info"
+        },
+        {
+          "id": "shifts-hierarchy",
+          "heading": "The Staffing Hierarchy",
+          "body": "• **Shifts** contain multiple **Tasks**.\n• **Tasks** contain **Options** (different ways to staff).\n• **Options** contain **Requirements** (the actual needs).\n* Example: A 'Service' Task might have an Option A (needs 2 Waiters) OR Option B (needs 1 Waiter + 1 Runner).",
+          "tone": "guide",
+          "calloutType": "tip"
+        },
+        {
+          "id": "shifts-requirements",
+          "heading": "Requirements",
+          "body": "A requirement dictates the exact number of workers needed, the required skill, and the *minimum* skill level (1-10).\n* Example: A requirement of [Chef:5] x 2 means you need two workers who possess the 'Chef' skill at level 5 or higher.",
+          "tone": "warning",
+          "calloutType": "warning"
+        }
+      ],
+      "relatedActions": [
+        "Add Shift",
+        "Edit Shift",
+        "Delete Shift"
+      ],
+      "glossaryTerms": [
+        "task_option_or_logic",
+        "requirement_and_logic",
+        "time_window"
+      ],
+      "version": "1.1"
+    },
+    {
+      "id": "constraints.logic",
+      "title": "Constraints: Feasibility vs Preferences",
+      "audience": "Planner and optimization users",
+      "sections": [
+        {
+          "id": "constraints-hard-soft",
+          "heading": "Hard vs. Soft Constraints",
+          "body": "A **Hard Constraint** strictly MUST be met. If it cannot be satisfied, the solver fails and generates no schedule. A **Soft Constraint** is a preference. Breaking it lowers the objective score (penalty), but the schedule still runs.\n* Example: A Hard 'Max Hours' constraint means a worker cannot physically be scheduled for a 41st hour.",
+          "tone": "info",
+          "calloutType": "info"
+        },
+        {
+          "id": "constraints-available",
+          "heading": "Available Constraints (Exhaustive List)",
+          "body": "• **Max Hours:** Prevents a worker from exceeding a set weekly hour limit (e.g., 40 hours).\n• **Minimum Rest:** Ensures a worker gets adequate time off between shifts (e.g., 10 hours between close and open).\n• **Mutual Exclusion:** Prevents Worker A and Worker B from ever working the exact same shift together.\n• **Co-location:** Forces Worker A and Worker B to ALWAYS work the same shifts together.\n• **Task Priorities:** Biases the solver to prefer Option A over Option B when satisfying a task.",
+          "tone": "guide",
+          "calloutType": "tip"
+        }
+      ],
+      "relatedActions": [
+        "Add Constraint",
+        "Save Changes",
+        "Refresh Constraints"
+      ],
+      "glossaryTerms": [
+        "hard_constraint",
+        "soft_constraint",
+        "static_constraint",
+        "dynamic_constraint"
+      ],
+      "version": "1.1"
+    },
+    {
+      "id": "schedule.interpretation",
+      "title": "Schedule: Reading Results and Quality Signals",
+      "audience": "Reviewers and operations users",
+      "sections": [
+        {
+          "id": "schedule-grid",
+          "heading": "Assignment Grid",
+          "body": "The schedule is built with Days as columns and Shifts as individual cards. Inside each shift card, workers are grouped by the specific Task they are fulfilling.\n* Example: Tuesday column -> Evening Shift card -> Kitchen Task -> lists 'John' and 'Mary'.",
+          "tone": "info",
+          "calloutType": "info"
+        },
+        {
+          "id": "schedule-scores",
+          "heading": "Interpreting Scores (Soft Violations)",
+          "body": "Green scores mean worker preferences were met. Red scores mean Soft Constraints were violated, incurring a penalty that lowers total schedule quality.\n* Example: A red '-5' score might mean John was scheduled during a time he marked as 'Avoid', breaking a preference.",
+          "tone": "guide",
+          "calloutType": "tip"
+        },
+        {
+          "id": "schedule-diagnostics",
+          "heading": "Running Diagnostics",
+          "body": "If the solver fails to generate a schedule, the grid will remain empty. Click the **Run Diagnostics** button to have the engine explain exactly which Hard Constraint failed.\n* Example: Diagnostics output \"SKILL GAP: No workers have the 'Chef' skill\" if you required a Chef but didn't add one to your Workers list.",
+          "tone": "warning",
+          "calloutType": "warning"
+        }
+      ],
+      "relatedActions": [
+        "Run Solver",
+        "Inspect Shift Card",
+        "Open Shift Details"
+      ],
+      "glossaryTerms": [
+        "objective_score",
+        "efficiency_ratio",
+        "global_violation_mapping"
+      ],
+      "version": "1.1"
+    },
+    {
+      "id": "data.management",
+      "title": "Data Management: Import & Export Workflow",
+      "audience": "All users",
+      "sections": [
+        {
+          "id": "data-saving",
+          "heading": "Saving Your State",
+          "body": "Exporting an Excel State File is the official way to safely back up your Workers, Shifts, and Constraints offline.",
+          "tone": "info",
+          "calloutType": "info"
+        },
+        {
+          "id": "data-workflow",
+          "heading": "The Ideal Workflow",
+          "body": "1. Edit your Workers and Shifts directly in this UI.\n2. Click 'Export State' to download your progress.\n3. Later, upload that exact Excel file to restore your work.\n* Example: You finish drafting Monday-Wednesday, Export State, and upload it on Friday to finish the week.",
+          "tone": "guide",
+          "calloutType": "tip"
+        },
+        {
+          "id": "data-warning",
+          "heading": "⚠️ CRUCIAL WARNING REGARDING MANUAL EDITS",
+          "body": "We strongly advise against manually editing the exported Excel file in Excel or Google Sheets.\n* Example: Adding a rogue space or changing a time format manually in Excel will corrupt the syntax and prevent you from successfully re-importing the file later.",
+          "tone": "warning",
+          "calloutType": "warning"
+        }
+      ],
+      "relatedActions": [
+        "Import Excel",
+        "Export Result",
+        "Export State",
+        "Reset Data"
+      ],
+      "glossaryTerms": [
+        "round_trip_state",
+        "import_validation"
+      ],
+      "version": "1.1"
+    }
+  ]
+}

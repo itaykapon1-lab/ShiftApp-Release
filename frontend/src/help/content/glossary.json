@@ -1,0 +1,69 @@
+{
+  "terms": [
+    {
+      "id": "hard_constraint",
+      "title": "Hard Constraint",
+      "content": "A rule that must be satisfied. Violations make the schedule infeasible."
+    },
+    {
+      "id": "soft_constraint",
+      "title": "Soft Constraint",
+      "content": "A preference rule. Violations are allowed but reduce objective score via penalties."
+    },
+    {
+      "id": "static_constraint",
+      "title": "Static Constraint",
+      "content": "A global rule that applies system-wide, not tied to a specific worker pair."
+    },
+    {
+      "id": "dynamic_constraint",
+      "title": "Dynamic Constraint",
+      "content": "A pair-specific rule, usually involving two workers (for example exclusion or pairing)."
+    },
+    {
+      "id": "task_option_or_logic",
+      "title": "Task Option (OR)",
+      "content": "Alternative staffing patterns for a task. Solver chooses one option per task."
+    },
+    {
+      "id": "requirement_and_logic",
+      "title": "Requirement (AND)",
+      "content": "All requirements inside the chosen option must be met simultaneously."
+    },
+    {
+      "id": "time_window",
+      "title": "Time Window",
+      "content": "Start and end boundaries that define when a worker can work or when a shift occurs."
+    },
+    {
+      "id": "objective_score",
+      "title": "Objective Score",
+      "content": "The optimization score produced by the solver, combining rewards and penalties."
+    },
+    {
+      "id": "efficiency_ratio",
+      "title": "Efficiency",
+      "content": "Displayed as objective_value/theoretical_max_score as a percentage for orientation."
+    },
+    {
+      "id": "global_violation_mapping",
+      "title": "Global Violation Mapping",
+      "content": "Process that maps global penalty violations onto assignment cards for visual explainability."
+    },
+    {
+      "id": "round_trip_state",
+      "title": "Round-Trip State",
+      "content": "An export that can be re-imported to restore workers, shifts, and constraints."
+    },
+    {
+      "id": "import_validation",
+      "title": "Import Validation",
+      "content": "Pre-checks that enforce required sheets/columns and normalize known format variants."
+    },
+    {
+      "id": "skill_level_threshold",
+      "title": "Skill Level Threshold",
+      "content": "Minimum level required for a worker to satisfy a requirement for a skill."
+    }
+  ]
+}

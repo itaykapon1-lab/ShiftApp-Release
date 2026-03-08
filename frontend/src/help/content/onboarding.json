@@ -1,0 +1,30 @@
+{
+  "version": "2026-02-16",
+  "storageKey": "shiftapp:onboarding:v1",
+  "steps": [
+    {
+      "id": "onboarding-workers",
+      "title": "Start With Workers",
+      "description": "Open Workers to add employee profiles, skills, and availability windows.",
+      "targetId": "tab-workers"
+    },
+    {
+      "id": "onboarding-shifts",
+      "title": "Define Shift Demand",
+      "description": "Open Shifts and define time windows plus staffing requirements.",
+      "targetId": "tab-shifts"
+    },
+    {
+      "id": "onboarding-solver",
+      "title": "Run Optimization",
+      "description": "Use Run Solver after workers and shifts are loaded.",
+      "targetId": "btn-run-solver"
+    },
+    {
+      "id": "onboarding-export",
+      "title": "Save or Share Results",
+      "description": "Export Result for output, or Export State for a full restorable snapshot.",
+      "targetId": "btn-export-state"
+    }
+  ]
+}

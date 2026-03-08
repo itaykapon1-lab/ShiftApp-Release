@@ -1,0 +1,11 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.help-onboarding-highlight {
+  position: relative;
+  z-index: 1;
+  border-radius: 0.75rem;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.75), 0 10px 24px rgba(79, 70, 229, 0.35);
+  transition: box-shadow 0.2s ease-in-out;
+}
