@@ -59,3 +59,12 @@ pgdata/
 .qodo/
 CLAUDE.md
 DEEPDIVE/
+
+# ===== Purged Content (prevent re-introduction) =====
+frontend/package-lock.json
+*.xlsx
+*.csv
+docs/
+scripts/generate_*.py
+scripts/migrate_*.py
+frontend/src/tests/
