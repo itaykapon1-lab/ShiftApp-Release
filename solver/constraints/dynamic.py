@@ -87,28 +87,41 @@ class MutualExclusionConstraint(BaseConstraint):
         solver = context.solver
         self._soft_violation_markers.clear()
 
+        # Resolve worker IDs against the current solver context (handles case
+        # normalization and validates workers exist in the current session).
         worker_a_id = self._resolve_worker_id(context, self.w_a)
         worker_b_id = self._resolve_worker_id(context, self.w_b)
         if not worker_a_id or not worker_b_id:
-            return
+            return  # One or both workers not found; skip silently.
 
         for shift in context.shifts:
+            # Get all X variables for each worker within this shift.
             vars_a = context.worker_shift_assignments.get((worker_a_id, shift.shift_id), [])
             vars_b = context.worker_shift_assignments.get((worker_b_id, shift.shift_id), [])
             if not vars_a or not vars_b:
-                continue
+                continue  # At least one worker isn't eligible here; no conflict.
 
+            # Aggregate: is_working = Sum(X_vars) >= 1 means worker is assigned.
             is_working_a = sum(vars_a)
             is_working_b = sum(vars_b)
 
             if self.type == ConstraintType.HARD:
+                # Formula: is_working_A + is_working_B <= 1
+                # In English: "Worker A and Worker B cannot both be assigned
+                # to this shift. The solver must pick at most one of them."
                 solver.Add(is_working_a + is_working_b <= 1)
             else:
+                # SOFT mode: allow the co-assignment but penalize it.
+                # Boolean V = 1 when both workers are assigned to this shift.
                 violation_var = solver.BoolVar(
                     f"violation_ban_{worker_a_id}_{worker_b_id}_{shift.shift_id}"
                 )
+                # Formula: V >= is_working_A + is_working_B - 1
+                # Forces V = 1 when both are assigned (sum >= 2 -> V >= 1).
                 solver.Add(is_working_a + is_working_b - 1 <= violation_var)
+                # Objective penalty: V * penalty (negative) deducted from score.
                 solver.Objective().SetCoefficient(violation_var, self.penalty)
+                # Store for post-solve violation reporting.
                 self._soft_violation_markers.append(
                     (worker_a_id, worker_b_id, shift.shift_id, shift.name, violation_var)
                 )
@@ -190,6 +203,7 @@ class CoLocationConstraint(BaseConstraint):
         self._diff_markers.clear()
         self._single_side_markers.clear()
 
+        # Resolve both worker IDs (case-insensitive, trimmed).
         worker_a_id = MutualExclusionConstraint._resolve_worker_id(context, self.w_a)
         worker_b_id = MutualExclusionConstraint._resolve_worker_id(context, self.w_b)
         if not worker_a_id or not worker_b_id:
@@ -200,12 +214,19 @@ class CoLocationConstraint(BaseConstraint):
             vars_b = context.worker_shift_assignments.get((worker_b_id, shift.shift_id), [])
 
             if not vars_a and not vars_b:
-                continue
+                continue  # Neither worker is eligible for this shift.
 
+            # Edge case: Only ONE of the paired workers is eligible for this
+            # shift (the other has no X variables here, e.g., lacks skills).
+            # If co-location is required, the eligible worker must NOT work.
             if (vars_a and not vars_b) or (vars_b and not vars_a):
+                # Sum of assignment vars for the one eligible worker.
                 valid_sum = sum(vars_a) if vars_a else sum(vars_b)
 
                 if self.type == ConstraintType.HARD:
+                    # Formula: Sum(X_eligible_worker) == 0
+                    # In English: "Since the partner can't work this shift,
+                    # the eligible worker is also forbidden from working it."
                     solver.Add(valid_sum == 0)
                 else:
                     active_worker_id = worker_a_id if vars_a else worker_b_id
@@ -213,6 +234,8 @@ class CoLocationConstraint(BaseConstraint):
                     violation_var = solver.BoolVar(
                         f"solo_pair_{active_worker_id}_{missing_worker_id}_{shift.shift_id}"
                     )
+                    # Formula: Sum(X_eligible) <= V (violation indicator)
+                    # If assigned: V forced to 1; penalty applied.
                     solver.Add(valid_sum <= violation_var)
                     solver.Objective().SetCoefficient(violation_var, self.penalty)
                     self._single_side_markers.append(
@@ -220,17 +243,28 @@ class CoLocationConstraint(BaseConstraint):
                     )
                 continue
 
+            # Normal case: Both workers are eligible for this shift.
+            # Enforce symmetry: they must both work or both not work.
             is_working_a = sum(vars_a)
             is_working_b = sum(vars_b)
 
             if self.type == ConstraintType.HARD:
+                # Formula: is_working_A == is_working_B
+                # In English: "If Worker A works this shift, Worker B must too
+                # (and vice versa). They are an inseparable pair."
                 solver.Add(is_working_a == is_working_b)
             else:
+                # SOFT mode: penalize asymmetric assignments using an absolute-
+                # difference indicator variable D.
                 diff = solver.BoolVar(
                     f"diff_pair_{worker_a_id}_{worker_b_id}_{shift.shift_id}"
                 )
+                # D >= |is_working_A - is_working_B| (linearized as two inequalities):
+                # D >= A - B  AND  D >= B - A
+                # If one works and the other doesn't: D forced to 1.
                 solver.Add(diff >= is_working_a - is_working_b)
                 solver.Add(diff >= is_working_b - is_working_a)
+                # Objective penalty: D * penalty (negative).
                 solver.Objective().SetCoefficient(diff, self.penalty)
                 self._diff_markers.append(
                     (worker_a_id, worker_b_id, shift.shift_id, shift.name, diff, vars_a, vars_b)

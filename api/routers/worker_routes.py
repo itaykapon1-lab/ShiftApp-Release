@@ -4,6 +4,7 @@ Worker CRUD Route Handlers.
 Extracted from the monolithic api/routes.py.
 All logic, variables, and comments are preserved exactly as they were.
 """
+import logging
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
@@ -14,6 +15,8 @@ from data.models import WorkerModel
 from repositories.sql_repo import SQLWorkerRepository
 from api.deps import get_session_id
 from api.routers.helpers import _map_model_to_worker_schema
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["workers"])
 
@@ -45,9 +48,12 @@ async def create_worker(
             raise HTTPException(500, detail="Worker was created but could not be retrieved")
 
         return _map_model_to_worker_schema(db_model)
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(500, detail=f"Failed to create worker: {str(e)}")
+        logger.error("Failed to create worker: %s", e, exc_info=True)
+        raise HTTPException(500, detail="Failed to create worker. Please try again or contact support.")
 
 @router.get("/workers", response_model=List[WorkerRead])
 async def get_workers(
@@ -106,9 +112,12 @@ async def update_worker(
             raise HTTPException(404, detail=f"Worker '{worker_id}' not found after update")
 
         return _map_model_to_worker_schema(db_model)
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(500, detail=f"Failed to update worker: {str(e)}")
+        logger.error("Failed to update worker: %s", e, exc_info=True)
+        raise HTTPException(500, detail="Failed to update worker. Please try again or contact support.")
 
 @router.delete("/workers/{worker_id}", status_code=200)
 async def delete_worker(
@@ -138,4 +147,5 @@ async def delete_worker(
         raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(500, detail=f"Failed to delete worker: {str(e)}")
+        logger.error("Failed to delete worker: %s", e, exc_info=True)
+        raise HTTPException(500, detail="Failed to delete worker. Please try again or contact support.")

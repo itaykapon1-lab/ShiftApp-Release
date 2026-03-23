@@ -25,6 +25,7 @@ class JobSubmitRequest(BaseModel):
 class Assignment(BaseModel):
     """Represents a single worker-shift assignment."""
     worker_name: str
+    worker_id: Optional[str] = None
     shift_name: str
     time: str
     task: str
@@ -52,3 +53,6 @@ class JobStatusResponse(BaseModel):
 
     # Diagnostics (populated when result_status is "Infeasible")
     diagnosis_message: Optional[str] = None
+    diagnosis_status: Optional[str] = None
+    diagnosis_attempt: Optional[int] = None
+    diagnosis_updated_at: Optional[datetime] = None

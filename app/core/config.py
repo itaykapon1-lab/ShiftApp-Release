@@ -9,12 +9,15 @@ HYBRID DATABASE MODE:
 """
 
 import os
-from pydantic_settings import BaseSettings
-from typing import Optional, List
+from pydantic import field_validator, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import List, Optional
 
 
 class Settings(BaseSettings):
     """Application settings with environment variable support."""
+
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
 
     # ========================================
     # Database Configuration (Hybrid Mode)
@@ -30,6 +33,15 @@ class Settings(BaseSettings):
     db_pool_size: int = 10          # 20 users ÷ 2 = 10 connections
     db_max_overflow: int = 5        # Burst capacity
     db_pool_pre_ping: bool = True   # Auto-reconnect stale connections
+    db_pool_timeout: int = 30       # Seconds to wait for a connection from pool
+    db_pool_recycle: int = 1800     # Recycle connections after 30 minutes (prevents stale)
+
+    # ========================================
+    # Redis Configuration (Rate Limiting)
+    # ========================================
+    # If set, slowapi uses Redis for cross-worker rate limit storage.
+    # Without this, each Gunicorn worker has its own in-memory counter.
+    redis_url: Optional[str] = None
 
     # ========================================
     # Session & Security Configuration
@@ -66,6 +78,11 @@ class Settings(BaseSettings):
     ]
 
     # ========================================
+    # Logging Configuration
+    # ========================================
+    log_level: str = "INFO"         # Root log level (DEBUG, INFO, WARNING, ERROR)
+
+    # ========================================
     # File Upload Configuration
     # ========================================
     max_file_size_mb: int = 10  # Maximum upload size in MB
@@ -100,15 +117,23 @@ class Settings(BaseSettings):
         """Returns True if cookies should use Secure flag (HTTPS only)."""
         return self.is_production
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
-        # Support comma-separated CORS_ORIGINS in env
-        @classmethod
-        def parse_env_var(cls, field_name: str, raw_val: str):
-            if field_name == "cors_origins":
-                return [origin.strip() for origin in raw_val.split(",")]
-            return raw_val
+    @model_validator(mode='after')
+    def _reject_default_secret_in_production(self) -> 'Settings':
+        """Prevents the application from starting in production with the default dev secret key."""
+        if self.is_production and self.secret_key == "dev-secret-key-change-in-production":
+            raise ValueError(
+                "Production environment must not use the default dev secret key. "
+                "Set the SECRET_KEY environment variable to a secure, random value."
+            )
+        return self
+
+    @field_validator('cors_origins', mode='before')
+    @classmethod
+    def _parse_cors_origins(cls, v: object) -> object:
+        """Support comma-separated CORS_ORIGINS in env."""
+        if isinstance(v, str):
+            return [origin.strip() for origin in v.split(",")]
+        return v
 
 
 # Global settings instance

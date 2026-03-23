@@ -3,9 +3,9 @@
 // Now with OPT-IN diagnostics support
 // ========================================
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { AlertCircle, AlertTriangle, CheckCircle, XCircle, Info, Search, Loader2 } from 'lucide-react';
-import { runDiagnostics } from '../api/endpoints';
+import { runDiagnostics, getJobStatus } from '../api/endpoints';
 
 /**
  * SolverDiagnostics Component
@@ -26,8 +26,21 @@ import { runDiagnostics } from '../api/endpoints';
  */
 const SolverDiagnostics = ({ result, jobId, onDiagnosisComplete }) => {
     const [diagnosis, setDiagnosis] = useState(result?.diagnosis_message || null);
+    const [diagnosisStatus, setDiagnosisStatus] = useState(result?.diagnosis_status || null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(null);
+    const isMountedRef = useRef(true);
+
+    useEffect(() => {
+        setDiagnosis(result?.diagnosis_message || null);
+        setDiagnosisStatus(result?.diagnosis_status || null);
+        setError(null);
+        setIsLoading(false);
+    }, [jobId, result?.diagnosis_message, result?.diagnosis_status]);
+
+    useEffect(() => {
+        return () => { isMountedRef.current = false; };
+    }, []);
 
     // Don't render if no result or optimal solution
     if (!result || result.result_status === 'Optimal') {
@@ -49,21 +62,60 @@ const SolverDiagnostics = ({ result, jobId, onDiagnosisComplete }) => {
         }
 
         setIsLoading(true);
+        setDiagnosis(null);
+        setDiagnosisStatus('PENDING');
         setError(null);
 
         try {
-            const response = await runDiagnostics(jobId);
-            setDiagnosis(response.diagnosis);
-            if (onDiagnosisComplete) {
-                onDiagnosisComplete(response.diagnosis);
+            // Step 1: Trigger async diagnostics (returns 202)
+            const enqueueResult = await runDiagnostics(jobId);
+            if (!isMountedRef.current) return;
+            setDiagnosisStatus(enqueueResult?.diagnosis_status || 'PENDING');
+
+            // Step 2: Poll GET /status/{jobId} until diagnosis is terminal
+            const POLL_MS = 1500;
+            const MAX_ATTEMPTS = 40; // 60s timeout (mitigates executor starvation)
+
+            for (let i = 0; i < MAX_ATTEMPTS; i++) {
+                await new Promise(r => setTimeout(r, POLL_MS));
+                if (!isMountedRef.current) return;
+
+                const status = await getJobStatus(jobId);
+                if (!isMountedRef.current) return;
+                setDiagnosisStatus(status.diagnosis_status || null);
+
+                if (status.diagnosis_status === 'COMPLETED') {
+                    setDiagnosis(status.diagnosis_message || null);
+                    setError(null);
+                    if (onDiagnosisComplete) {
+                        onDiagnosisComplete(status.diagnosis_message);
+                    }
+                    return;
+                }
+                if (status.diagnosis_status === 'FAILED') {
+                    setDiagnosis(status.diagnosis_message || null);
+                    setError(status.diagnosis_message || 'Diagnostics failed. Please try again.');
+                    return;
+                }
             }
+            if (!isMountedRef.current) return;
+            setDiagnosisStatus('FAILED');
+            setError('Diagnostics timed out. Please try again.');
         } catch (err) {
-            console.error('❌ Diagnostics failed:', err);
+            console.error('Diagnostics failed:', err);
+            if (!isMountedRef.current) return;
+            setDiagnosisStatus('FAILED');
             setError(err.message || 'Failed to run diagnostics');
         } finally {
-            setIsLoading(false);
+            if (isMountedRef.current) {
+                setIsLoading(false);
+            }
         }
     };
+
+    const showCompletedDiagnosis = diagnosisStatus === 'COMPLETED' && Boolean(diagnosis);
+    const showLoadingState = isLoading || diagnosisStatus === 'PENDING' || diagnosisStatus === 'RUNNING';
+    const showRetryButton = diagnosisStatus === null || diagnosisStatus === 'FAILED';
 
     return (
         <div className={`mt-6 rounded-2xl border-4 overflow-hidden shadow-xl ${isInfeasible
@@ -95,18 +147,18 @@ const SolverDiagnostics = ({ result, jobId, onDiagnosisComplete }) => {
                             <div className="flex-1">
                                 <h4 className="font-bold text-gray-800 mb-2">Diagnosis:</h4>
 
-                                {/* Show diagnosis if available */}
-                                {diagnosis ? (
+                                {showCompletedDiagnosis ? (
                                     <pre className="text-sm text-gray-700 whitespace-pre-wrap font-mono bg-gray-50 p-3 rounded-lg border">
                                         {diagnosis}
                                     </pre>
                                 ) : (
-                                    /* Show Run Diagnostics button if no diagnosis yet */
                                     <div className="space-y-3">
-                                        <p className="text-sm text-gray-600">
-                                            Click the button below to analyze why no solution was found.
-                                            This will identify which constraints are causing the conflict.
-                                        </p>
+                                        {showRetryButton && (
+                                            <p className="text-sm text-gray-600">
+                                                Click the button below to analyze why no solution was found.
+                                                This will identify which constraints are causing the conflict.
+                                            </p>
+                                        )}
 
                                         {error && (
                                             <div className="text-sm text-red-600 bg-red-50 p-2 rounded border border-red-200">
@@ -114,26 +166,26 @@ const SolverDiagnostics = ({ result, jobId, onDiagnosisComplete }) => {
                                             </div>
                                         )}
 
-                                        <button
-                                            onClick={handleRunDiagnostics}
-                                            disabled={isLoading}
-                                            className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-white transition-all ${isLoading
-                                                    ? 'bg-gray-400 cursor-not-allowed'
-                                                    : 'bg-blue-600 hover:bg-blue-700 hover:scale-105'
-                                                }`}
-                                        >
-                                            {isLoading ? (
-                                                <>
-                                                    <Loader2 className="w-5 h-5 animate-spin" />
-                                                    Analyzing...
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <Search className="w-5 h-5" />
-                                                    Run Diagnostics
-                                                </>
-                                            )}
-                                        </button>
+                                        {showLoadingState && (
+                                            <div className="flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-white bg-gray-500">
+                                                <Loader2 className="w-5 h-5 animate-spin" />
+                                                Analyzing...
+                                            </div>
+                                        )}
+
+                                        {showRetryButton && (
+                                            <button
+                                                onClick={handleRunDiagnostics}
+                                                disabled={isLoading}
+                                                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-white transition-all ${isLoading
+                                                        ? 'bg-gray-400 cursor-not-allowed'
+                                                        : 'bg-blue-600 hover:bg-blue-700 hover:scale-105'
+                                                    }`}
+                                            >
+                                                <Search className="w-5 h-5" />
+                                                {diagnosisStatus === 'FAILED' ? 'Retry Diagnostics' : 'Run Diagnostics'}
+                                            </button>
+                                        )}
                                     </div>
                                 )}
                             </div>

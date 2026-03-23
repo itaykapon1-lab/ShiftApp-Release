@@ -11,6 +11,9 @@ from typing import List
 
 from domain.worker_model import Worker
 from domain.shift_model import Shift
+# NOTE: This import references the DEPRECATED constraint config module.
+# It is used here only as a type hint for the DTO field.
+# See Tech Debt #1 — solver/constraints/config.py is scheduled for removal.
 from solver.constraints.config import ConstraintConfig
 
 
@@ -34,7 +37,12 @@ class SchedulingData:
             This is crucial for mapping generic days (e.g., "Monday") to
             concrete timestamps.
     """
+    # All available staff with their skills, availability windows, and preferences
     workers: List[Worker]
+    # All time slots that need to be staffed, each containing task requirements
     shifts: List[Shift]
+    # Global constraint rules (max hours, mutual exclusions, co-locations)
     constraint_config: ConstraintConfig
+    # Reference anchor for mapping day names (e.g., "Monday") to concrete dates.
+    # In the canonical system, this is always 2024-01-01 (Monday of epoch week).
     week_start_date: datetime

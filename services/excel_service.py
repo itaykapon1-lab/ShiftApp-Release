@@ -37,21 +37,26 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+# --- Validation Result Data Structures ---
+# These dataclasses collect errors and warnings discovered during pre-validation
+# of the uploaded Excel file, BEFORE the parser runs.  This allows the API to
+# return a structured error report to the frontend rather than failing mid-parse.
+
 @dataclass
 class ImportError:
     """Represents a single import error."""
-    sheet: str
-    row: Optional[int]
-    field: Optional[str]
-    message: str
-    severity: str = "error"  # "error" or "warning"
+    sheet: str              # Which Excel sheet the error was found in
+    row: Optional[int]      # Excel row number (1-indexed + header), or None for sheet-level errors
+    field: Optional[str]    # Column name where the error occurred
+    message: str            # Human-readable error description
+    severity: str = "error"  # "error" (blocks import) or "warning" (non-blocking)
 
 
 @dataclass
 class ImportValidationResult:
     """Aggregates all validation errors from an import operation."""
-    errors: List[ImportError] = field(default_factory=list)
-    warnings: List[ImportError] = field(default_factory=list)
+    errors: List[ImportError] = field(default_factory=list)     # Blocking errors — import cannot proceed
+    warnings: List[ImportError] = field(default_factory=list)   # Non-blocking — import proceeds with caveats
 
     def add_error(self, sheet: str, row: Optional[int], field: Optional[str], message: str):
         self.errors.append(ImportError(sheet=sheet, row=row, field=field, message=message))
@@ -103,7 +108,13 @@ class ImportValidationResult:
 
 
 class ImportValidationException(Exception):
-    """Exception raised when Excel import validation fails."""
+    """Exception raised when Excel import validation fails.
+
+    .. deprecated::
+        Use :class:`app.core.exceptions.ImportValidationError` instead.
+        This class is retained for backward compatibility with existing
+        tests and route handlers that import it from this module.
+    """
 
     def __init__(self, validation_result: ImportValidationResult):
         self.validation_result = validation_result
@@ -121,10 +132,13 @@ class ExcelService:
     def __init__(self, db: Session, session_id: str):
         self.db = db
         self.session_id = session_id
+        # Session-scoped repos ensure all queries are filtered by session_id.
         self.worker_repo = SQLWorkerRepository(db, session_id)
         self.shift_repo = SQLShiftRepository(db, session_id)
 
-        # Instantiate delegates
+        # Instantiate specialised delegates — each handles one aspect of Excel I/O.
+        # The Facade pattern keeps the public API surface small while splitting
+        # the 600+ lines of Excel logic into focused, testable modules.
         self._importer = ExcelImporter(db, session_id, self.worker_repo, self.shift_repo)
         self._exporter = ExcelExporter(db, session_id, self.worker_repo, self.shift_repo)
         self._constraint_mapper = ConstraintMapper(db, session_id)
@@ -135,124 +149,218 @@ class ExcelService:
     # ------------------------------------------------------------------
 
     def import_excel(self, file_content: bytes) -> Dict[str, Any]:
-        """
-        Orchestrates the Excel import process:
-        1. Saves upload to temp file.
-        2. Pre-validates the data (collects all errors).
-        3. Runs the external ExcelParser.
-        4. Adapts and saves constraints to the DB.
+        """Orchestrate the Excel import process.
+
+        # FORGIVING IMPORT CONTRACT
+        #
+        # The import pipeline is deliberately *forgiving*: it skips bad rows,
+        # imports all valid data, and returns a detailed warning report.
+        #
+        # FATAL vs WARNING distinction:
+        #   - FATAL (HTTP 400, full DB rollback): raised as ImportValidationException
+        #     when pre-validation finds structural errors (missing required sheets,
+        #     missing required columns, empty Worker IDs).
+        #   - WARNING (HTTP 200, data imported): non-blocking issues are collected
+        #     and returned in result["warnings"] as list[str].
+        #
+        # Three warning pipelines feed into the unified warnings list:
+        #   Pipeline A — Pre-validation (services/excel/importer.py):
+        #       ImportValidationResult.warnings — duplicate IDs (auto-corrected),
+        #       malformed task strings (auto-defaulted), invalid strictness
+        #       (auto-defaulted to HARD).
+        #   Pipeline B — Parser (data/ex_parser.py):
+        #       ExcelParser._warnings — bad availability cells (defaulted to
+        #       empty), empty Workers sheet, legacy OR syntax deprecation,
+        #       priority range clamping.
+        #   Pipeline C — Constraint mapper (services/excel/constraint_mapper.py):
+        #       ConstraintMapper.save_constraints() return value — unknown
+        #       constraint types (skipped), invalid parameter values (defaulted).
+
+        Stages:
+            1. Saves upload to temp file.
+            2. Pre-validates the data (collects all errors).
+            3. Runs the external ExcelParser.
+            4. Adapts and saves constraints to the DB.
 
         Raises:
             ImportValidationException: If validation errors are found.
             ValueError: If a server error occurs during import.
         """
-        import os
-        import tempfile
-        import pandas as pd
-        from data.models import WorkerModel, ShiftModel
-
         tmp_path: Optional[str] = None
 
         logger.info(f"Starting Excel import for session: {self.session_id}")
 
         try:
-            # 1. Create a temporary file
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-                tmp.write(file_content)
-                tmp_path = tmp.name
-
-            logger.debug(f"Temporary file created at: {tmp_path}")
-
-            # 2. PRE-VALIDATION: Check data before attempting import
-            logger.debug("Running pre-validation on Excel data")
-            xls = pd.ExcelFile(tmp_path)
-            validation_result = self._validate_excel_data(xls)
-
-            # If there are critical errors, fail early with detailed report
-            if validation_result.has_errors():
-                logger.warning(f"Validation failed: {len(validation_result.errors)} errors found")
-                raise ImportValidationException(validation_result)
-
-            # 3. NON-DESTRUCTIVE: Skip clearing - use upsert pattern instead
-            logger.debug("Using non-destructive import (upsert mode)")
-
-            # 4. Initialize the external Parser
-            logger.debug("Initializing ExcelParser")
-            parser = ExcelParser(
-                worker_repo=self.worker_repo,
-                shift_repo=self.shift_repo
-            )
-
-            # 5. Run the parser
-            if hasattr(parser, 'load_from_file'):
-                parser.load_from_file(tmp_path)
-            elif hasattr(parser, 'parse_file'):
-                parser.parse_file(tmp_path)
-            elif hasattr(parser, 'parse'):
-                parser.parse(tmp_path)
-            elif hasattr(parser, 'load'):
-                parser.load(tmp_path)
-            else:
-                raise NotImplementedError("ExcelParser has no recognized entry method.")
-
-            # 6. Extract and Transform Constraints (The Adapter Step)
-            logger.debug("Extracting and adapting parsed constraints")
+            tmp_path = self._write_temp_file(file_content)
+            validation_result = self._run_prevalidation(tmp_path)
+            parser = self._run_parser(tmp_path)
             constraint_errors = self._save_constraints(parser)
 
-            # 7. Commit Transaction
             logger.debug("Parsing finished, committing to DB")
             self.db.commit()
 
-            # 8. Verify Results
-            worker_count = self.db.query(WorkerModel).filter(WorkerModel.session_id == self.session_id).count()
-            shift_count = self.db.query(ShiftModel).filter(ShiftModel.session_id == self.session_id).count()
-
-            result: Dict[str, Any] = {
-                "workers": worker_count,
-                "shifts": shift_count
-            }
-
-            # 9. Collect all non-fatal warnings from every pipeline stage into
-            #    a single unified list.  Callers (API route + frontend) consume
-            #    only result["warnings"] — no stage-specific keys.
-            all_warnings: list[str] = []
-
-            # Stage A: pre-validation format warnings (non-blocking)
-            for w in validation_result.warnings:
-                loc = f"[{w.sheet}"
-                if w.row:
-                    loc += f", row {w.row}"
-                if w.field:
-                    loc += f", field '{w.field}'"
-                loc += "]"
-                all_warnings.append(f"{loc}: {w.message}")
-
-            # Stage B: parser-collected warnings (availability failures, empty sheet)
-            all_warnings.extend(getattr(parser, '_warnings', []))
-
-            # Stage C: constraint mapper errors (silently-skipped constraints)
-            for ce in constraint_errors:
-                all_warnings.append(f"Constraint import: {ce}")
-
-            if all_warnings:
-                result["warnings"] = all_warnings
-
-            return result
+            return self._build_import_result(validation_result, parser, constraint_errors)
 
         except ImportValidationException:
             self.db.rollback()
-            raise  # Re-raise validation exceptions as-is
+            raise
+        except ValueError:
+            self.db.rollback()
+            raise
         except Exception as e:
             logger.error(f"Import failed: {e}", exc_info=True)
             self.db.rollback()
-            raise ValueError(f"Server Error during import: {str(e)}")
-
+            raise ValueError(
+                "An unexpected error occurred while processing the Excel file. "
+                "Please verify the file format and structure."
+            )
         finally:
-            if tmp_path and os.path.exists(tmp_path):
-                try:
-                    os.remove(tmp_path)
-                except OSError:
-                    pass
+            self._cleanup_temp_file(tmp_path)
+
+    def _write_temp_file(self, file_content: bytes) -> str:
+        """Write raw upload bytes to a temp file for pandas/openpyxl to read.
+
+        Args:
+            file_content: Raw bytes from the uploaded Excel file.
+
+        Returns:
+            Absolute path to the created temporary file.
+        """
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+            tmp.write(file_content)
+            tmp_path = tmp.name
+
+        logger.debug(f"Temporary file created at: {tmp_path}")
+        return tmp_path
+
+    def _run_prevalidation(self, tmp_path: str) -> ImportValidationResult:
+        """Parse the workbook with pandas and check for structural errors.
+
+        Args:
+            tmp_path: Path to the temporary Excel file.
+
+        Returns:
+            ImportValidationResult containing any non-blocking warnings.
+
+        Raises:
+            ImportValidationException: If blocking validation errors are found.
+        """
+        import pandas as pd
+
+        logger.debug("Running pre-validation on Excel data")
+        xls = pd.ExcelFile(tmp_path)
+        validation_result = self._validate_excel_data(xls)
+
+        if validation_result.has_errors():
+            logger.warning(f"Validation failed: {len(validation_result.errors)} errors found")
+            raise ImportValidationException(validation_result)
+
+        return validation_result
+
+    def _run_parser(self, tmp_path: str) -> "ExcelParser":
+        """Create and run the ExcelParser on the temp file.
+
+        Uses the module-level ExcelParser import so that test patches on
+        ``"services.excel_service.ExcelParser"`` continue to work.
+
+        Args:
+            tmp_path: Path to the (pre-validated) temporary Excel file.
+
+        Returns:
+            The populated ExcelParser instance (workers/shifts written to repos).
+
+        Raises:
+            NotImplementedError: If ExcelParser has no recognized entry method.
+        """
+        logger.debug("Using non-destructive import (upsert mode)")
+        logger.debug("Initializing ExcelParser")
+        parser = ExcelParser(
+            worker_repo=self.worker_repo,
+            shift_repo=self.shift_repo
+        )
+
+        # Dynamically invoke whichever entry method the parser exposes.
+        if hasattr(parser, 'load_from_file'):
+            parser.load_from_file(tmp_path)
+        elif hasattr(parser, 'parse_file'):
+            parser.parse_file(tmp_path)
+        elif hasattr(parser, 'parse'):
+            parser.parse(tmp_path)
+        elif hasattr(parser, 'load'):
+            parser.load(tmp_path)
+        else:
+            raise NotImplementedError("ExcelParser has no recognized entry method.")
+
+        logger.debug("Extracting and adapting parsed constraints")
+        return parser
+
+    def _build_import_result(
+        self,
+        validation_result: ImportValidationResult,
+        parser: "ExcelParser",
+        constraint_errors: List[str],
+    ) -> Dict[str, Any]:
+        """Count persisted records and aggregate warnings from all pipelines.
+
+        Args:
+            validation_result: Pre-validation result (Pipeline A warnings).
+            parser: Populated parser instance (Pipeline B warnings).
+            constraint_errors: Constraint mapping errors (Pipeline C warnings).
+
+        Returns:
+            Dict with ``workers``, ``shifts`` counts and optional ``warnings`` list.
+        """
+        from data.models import WorkerModel, ShiftModel
+
+        worker_count = self.db.query(WorkerModel).filter(WorkerModel.session_id == self.session_id).count()
+        shift_count = self.db.query(ShiftModel).filter(ShiftModel.session_id == self.session_id).count()
+
+        result: Dict[str, Any] = {
+            "workers": worker_count,
+            "shifts": shift_count
+        }
+
+        # Aggregate non-fatal warnings from every pipeline stage into a
+        # single unified list.  The frontend displays these as toast messages.
+        all_warnings: list[str] = []
+
+        # Pipeline A: pre-validation format warnings (non-blocking)
+        for w in validation_result.warnings:
+            loc = f"[{w.sheet}"
+            if w.row:
+                loc += f", row {w.row}"
+            if w.field:
+                loc += f", field '{w.field}'"
+            loc += "]"
+            all_warnings.append(f"{loc}: {w.message}")
+
+        # Pipeline B: parser-collected warnings (availability failures, empty sheet)
+        all_warnings.extend(getattr(parser, '_warnings', []))
+
+        # Pipeline C: constraint mapper errors (silently-skipped constraints)
+        for ce in constraint_errors:
+            all_warnings.append(f"Constraint import: {ce}")
+
+        if all_warnings:
+            result["warnings"] = all_warnings
+
+        return result
+
+    def _cleanup_temp_file(self, tmp_path: Optional[str]) -> None:
+        """Remove the temp file, ignoring errors.
+
+        Args:
+            tmp_path: Path to the temporary file, or None if it was never created.
+        """
+        import os
+
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError as e:
+                logger.debug("Failed to remove temp file %s: %s", tmp_path, e)
 
     def export_excel(self) -> io.BytesIO:
         return self._exporter.export_excel()
@@ -261,8 +369,9 @@ class ExcelService:
         return self._state_exporter.export_full_state()
 
     # ------------------------------------------------------------------
-    # Private methods — delegate to sub-modules for backward compat
-    # (tests call these directly on ExcelService instances)
+    # Private methods — delegate to sub-modules for backward compat.
+    # Tests call these methods directly on ExcelService instances, so
+    # they must remain as pass-through proxies to the delegate objects.
     # ------------------------------------------------------------------
 
     def _find_column(self, df, candidates):
@@ -279,9 +388,6 @@ class ExcelService:
 
     def _validate_constraints_sheet(self, df, result):
         return self._importer._validate_constraints_sheet(df, result)
-
-    def _clear_session_data(self):
-        return self._importer._clear_session_data()
 
     def _save_constraints(self, parser):
         return self._constraint_mapper.save_constraints(parser)

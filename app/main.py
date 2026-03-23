@@ -12,13 +12,70 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
+from alembic import command
+from alembic.config import Config as AlembicConfig
+
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+
 from app.core.config import settings
-from app.db.session import engine, Base  # Import engine directly
+from app.core.exception_handlers import register_exception_handlers
+from app.core.rate_limiter import limiter
+from app.core.security_headers import SecurityHeadersMiddleware
 from api.routes import router
 from api.routes_constraints_schema import router as constraints_schema_router
 from solver.constraints.definitions import register_core_constraints
 
 logger = logging.getLogger(__name__)
+
+
+def _configure_logging(level: str) -> None:
+    """Configure root logger level from settings.
+
+    Falls back to INFO if the provided level string is not a valid
+    Python logging level name.
+
+    Args:
+        level: A log level name (e.g. "DEBUG", "INFO", "WARNING", "ERROR").
+    """
+    numeric = getattr(logging, level.upper(), logging.INFO)
+    logging.basicConfig(
+        level=numeric,
+        format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+        force=True,
+    )
+
+
+def _attach_security_headers(response: Response) -> Response:
+    """Apply the required security headers to a response object."""
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if settings.is_production:
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=63072000; includeSubDomains"
+        )
+    return response
+
+
+def _build_internal_error_response(request: Request, exc: Exception) -> JSONResponse:
+    """Create a sanitized 500 response with security headers attached."""
+    logger.error(
+        f"Unhandled exception on {request.method} {request.url.path}: {exc}",
+        exc_info=True,
+    )
+    if settings.is_production:
+        response = JSONResponse(
+            status_code=500,
+            content={"detail": "An internal server error occurred. Please try again later."},
+        )
+    else:
+        response = JSONResponse(
+            status_code=500,
+            content={"detail": f"[DEV] {type(exc).__name__}: {str(exc)[:500]}"},
+        )
+    return _attach_security_headers(response)
 
 
 @asynccontextmanager
@@ -30,15 +87,27 @@ async def lifespan(app: FastAPI):
     IMPORTANT: Critical errors (DB unavailable) will crash the app intentionally.
     This is fail-fast behavior to prevent silent deployment failures.
     """
-    logger.info("Initializing database schema...")
+    _configure_logging(settings.log_level)
+
+    logger.info("Running Alembic migrations...")
     # CRITICAL: Let DB errors propagate - app should NOT start if DB is unavailable
-    Base.metadata.create_all(bind=engine)
-    logger.info("Database tables verified/created successfully")
+    alembic_cfg = AlembicConfig("alembic.ini")
+    # Tell env.py to skip fileConfig() — we are running embedded inside uvicorn,
+    # and fileConfig(disable_existing_loggers=True) would kill uvicorn's loggers,
+    # silencing "Application startup complete" and all subsequent INFO messages.
+    alembic_cfg.attributes["configure_logger"] = False
+    command.upgrade(alembic_cfg, "head")
+    logger.info("Database schema up to date")
 
     logger.info("Registering constraint definitions...")
     # CRITICAL: Constraint registration must succeed for solver to work
     register_core_constraints()
     logger.info("Constraint definitions registered successfully")
+
+    logger.info("Running stale solver job recovery sweep...")
+    from services.solver_service import reap_stale_jobs
+    reap_stale_jobs()
+    logger.info("Startup stale-job recovery sweep completed")
 
     yield  # Application runs here
 
@@ -54,13 +123,19 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,  # Configured via env or defaults
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+register_exception_handlers(app)
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+# ========================================================================
+# Middleware stack (FastAPI processes add_middleware in LIFO order:
+# LAST added = OUTERMOST at runtime).
+#
+# Runtime order (outermost → innermost):
+#   SecurityHeaders → ProxyHeaders → CORS → Session → SlowAPI → App
+# ========================================================================
+app.add_middleware(SlowAPIMiddleware)
 
 # Add session middleware for signed cookies
 app.add_middleware(
@@ -69,6 +144,19 @@ app.add_middleware(
     max_age=settings.session_max_age,
     same_site="lax"
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,  # Configured via env or defaults
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "Cookie", "X-Requested-With"],
+)
+
+
+# SecurityHeaders MUST be outermost so it covers CORS preflights,
+# error responses, and every other path through the middleware stack.
+app.add_middleware(SecurityHeadersMiddleware)
 
 @app.middleware("http")
 async def session_id_middleware(request: Request, call_next):
@@ -81,7 +169,10 @@ async def session_id_middleware(request: Request, call_next):
         session_id = str(uuid.uuid4())
         request.state.session_id = session_id
 
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        response = _build_internal_error_response(request, exc)
 
     if hasattr(request.state, "session_id") and request.state.session_id:
         response.set_cookie(
@@ -102,23 +193,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     Catches unhandled exceptions and returns a generic error message.
     Internal details are logged but not exposed to clients for security.
     """
-    logger.error(
-        f"Unhandled exception on {request.method} {request.url.path}: {exc}",
-        exc_info=True
-    )
-
-    # In production, hide internal error details
-    if settings.is_production:
-        return JSONResponse(
-            status_code=500,
-            content={"detail": "An internal server error occurred. Please try again later."}
-        )
-
-    # In development, show the actual error for debugging
-    return JSONResponse(
-        status_code=500,
-        content={"detail": str(exc)}
-    )
+    return _build_internal_error_response(request, exc)
 
 
 # Register API routes

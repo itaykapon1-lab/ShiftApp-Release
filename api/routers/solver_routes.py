@@ -6,11 +6,13 @@ All logic, variables, and comments are preserved exactly as they were.
 """
 from typing import Dict
 from fastapi import APIRouter, HTTPException, Depends
-from sqlalchemy.orm import Session
+from fastapi.responses import JSONResponse
+from starlette.requests import Request
 
-from app.schemas.job import JobStatusResponse
-from app.db.session import get_db
+from app.core.rate_limiter import limiter
+from app.schemas.job import JobStatus, JobStatusResponse
 from services.solver_service import SolverService
+from services.diagnostic_service import DiagnosticService
 from api.deps import get_session_id
 
 router = APIRouter(tags=["solver"])
@@ -18,8 +20,10 @@ router = APIRouter(tags=["solver"])
 # --- SOLVER ---
 
 @router.post("/solve", response_model=Dict[str, str])
+@limiter.limit("3/minute")
 async def solve(
-    session_id: str = Depends(get_session_id)
+    request: Request,
+    session_id: str = Depends(get_session_id),
 ):
     """
     Starts a solver job using ProcessPoolExecutor.
@@ -29,12 +33,8 @@ async def solve(
 
     Returns 409 Conflict if session already has an active job.
     """
-    try:
-        job_id = SolverService.start_job(session_id=session_id)
-        return {"job_id": job_id}
-    except ValueError as e:
-        # Session already has an active job
-        raise HTTPException(status_code=409, detail=str(e))
+    job_id = SolverService.start_job(session_id=session_id)
+    return {"job_id": job_id}
 
 @router.get("/status/{job_id}", response_model=JobStatusResponse)
 async def get_job_status(
@@ -52,35 +52,47 @@ async def get_job_status(
 
 
 @router.post("/solve/{job_id}/diagnose")
+@limiter.limit("5/minute")
 async def run_diagnostics(
+    request: Request,
     job_id: str,
     session_id: str = Depends(get_session_id),
-    db: Session = Depends(get_db)
 ):
-    """
-    Trigger diagnostic analysis for a failed solver job.
+    """Trigger async diagnostic analysis for a failed solver job.
 
-    This endpoint is called on-demand when the user clicks "Run Diagnostics"
-    in the frontend. It performs an incremental constraint analysis to
-    identify which constraint(s) caused the infeasibility.
-
-    Returns:
-        dict: Contains the diagnosis message explaining the failure
+    Returns HTTP 202 Accepted. Poll GET /status/{job_id} for diagnosis_status
+    and diagnosis_message when complete.
     """
-    # Check if job exists
-    job_data = SolverService.get_job_status(job_id)
+    # Validate job exists and belongs to this session (multi-tenancy guard).
+    job_data = SolverService.get_job_status(job_id, session_id=session_id)
     if not job_data:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
-    # Check if job is in a failed/infeasible state
-    result_status = job_data.get("result_status")
-    if result_status not in ["Infeasible", None]:
+    # Gate 1: Job must be in terminal FAILED state.
+    # PENDING/RUNNING jobs have result_status=None which passed the old check.
+    job_status = job_data.get("status")
+    if job_status != JobStatus.FAILED:
         raise HTTPException(
             status_code=400,
-            detail=f"Diagnostics only available for failed jobs. Current status: {result_status}"
+            detail=f"Diagnostics only available for failed jobs. Current status: {job_status}",
         )
 
-    # Run diagnostics
-    diagnosis = SolverService.run_diagnostics(job_id, session_id)
+    # Gate 2: Failure must be mathematical (Infeasible), not an OS crash or timeout.
+    # Running diagnostics on an OOM-crashed job will just cause another OOM crash
+    # or return garbage — the diagnostic engine needs a solvable model to analyze.
+    result_status = job_data.get("result_status")
+    if result_status != "Infeasible":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Diagnostics only available for infeasible jobs. Result status: {result_status}",
+        )
 
-    return {"diagnosis": diagnosis}
+    try:
+        DiagnosticService.start_diagnosis(job_id, session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+    return JSONResponse(
+        status_code=202,
+        content={"job_id": job_id, "diagnosis_status": "PENDING"},
+    )

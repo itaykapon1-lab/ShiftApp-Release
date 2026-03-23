@@ -69,16 +69,20 @@ class ConstraintRegistry:
         hard_count = 0
         soft_count = 0
 
-        # Phase 1: Apply Hard Constraints
-        # We apply these first to establish the feasibility boundaries of the problem.
+        # Phase 1: Apply Hard Constraints (feasibility rules).
+        # Hard constraints call solver.Add() to create equations that the
+        # solver MUST satisfy. The solution is infeasible if any is violated.
+        # Applied first so soft constraints operate within feasible bounds.
         for constraint in self._constraints:
             if constraint.enabled and constraint.type == ConstraintType.HARD:
                 logger.debug("Applying hard constraint: %s", constraint.name)
                 constraint.apply(context)
                 hard_count += 1
 
-        # Phase 2: Apply Soft Constraints
-        # These add penalty terms to the objective function within the boundaries set above.
+        # Phase 2: Apply Soft Constraints (optimization preferences).
+        # Soft constraints add penalty/reward coefficients to the objective
+        # function. The solver will try to minimize penalties (maximize the
+        # objective) but is allowed to violate these if needed for feasibility.
         for constraint in self._constraints:
             if constraint.enabled and constraint.type == ConstraintType.SOFT:
                 logger.debug("Applying soft constraint: %s", constraint.name)

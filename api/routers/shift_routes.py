@@ -4,18 +4,63 @@ Shift CRUD Route Handlers.
 Extracted from the monolithic api/routes.py.
 All logic, variables, and comments are preserved exactly as they were.
 """
+import logging
 from typing import List
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 
 from app.schemas.shift import ShiftCreate, ShiftRead
 from app.db.session import get_db
+from app.utils.date_normalization import normalize_to_canonical_week
 from data.models import ShiftModel
 from repositories.sql_repo import SQLShiftRepository
 from api.deps import get_session_id
 from api.routers.helpers import _map_model_to_shift_schema
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["shifts"])
+
+
+def _check_duplicate_shift_window(
+    db: Session,
+    session_id: str,
+    name: str,
+    start_time: str,
+    end_time: str,
+    exclude_shift_id: str | None = None,
+) -> None:
+    """Raises 409 if a shift with the same (session, name, start, end) exists.
+
+    Args:
+        db: Active SQLAlchemy session.
+        session_id: Tenant identifier.
+        name: Shift name to check.
+        start_time: Raw start time (will be normalized to canonical week).
+        end_time: Raw end time (will be normalized to canonical week).
+        exclude_shift_id: Shift ID to exclude (for update operations).
+
+    Raises:
+        HTTPException: 409 Conflict when a duplicate is found.
+    """
+    canonical_start = normalize_to_canonical_week(start_time)
+    canonical_end = normalize_to_canonical_week(end_time)
+
+    query = db.query(ShiftModel).filter_by(
+        session_id=session_id,
+        name=name,
+        start_time=canonical_start,
+        end_time=canonical_end,
+    )
+    if exclude_shift_id:
+        query = query.filter(ShiftModel.shift_id != exclude_shift_id)
+
+    if query.first() is not None:
+        raise HTTPException(
+            409,
+            detail="A shift with this exact name and time window already exists.",
+        )
+
 
 # ==========================================
 # CRUD: SHIFTS (Fixed)
@@ -28,6 +73,10 @@ async def create_shift(
     db: Session = Depends(get_db)
 ):
     try:
+        _check_duplicate_shift_window(
+            db, session_id, shift_in.name, shift_in.start_time, shift_in.end_time,
+        )
+
         repo = SQLShiftRepository(db, session_id)
         domain_shift = repo.create_from_schema(shift_in)
         db.commit()
@@ -42,9 +91,12 @@ async def create_shift(
             raise HTTPException(500, detail="Shift was created but could not be retrieved")
 
         return _map_model_to_shift_schema(db_model)
+    except HTTPException:
+        raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(500, detail=f"Failed to create shift: {str(e)}")
+        logger.error("Failed to create shift: %s", e, exc_info=True)
+        raise HTTPException(500, detail="Failed to create shift. Please try again or contact support.")
 
 @router.get("/shifts", response_model=List[ShiftRead])
 async def get_shifts(
@@ -108,6 +160,11 @@ async def update_shift(
         if not existing_model:
             raise HTTPException(404, detail=f"Shift '{shift_id}' not found")
 
+        _check_duplicate_shift_window(
+            db, session_id, shift_in.name, shift_in.start_time, shift_in.end_time,
+            exclude_shift_id=shift_id,
+        )
+
         # Perform update via canonicalized repository path.
         repo = SQLShiftRepository(db, session_id)
         shift_in.shift_id = shift_id
@@ -129,7 +186,8 @@ async def update_shift(
         raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(500, detail=f"Failed to update shift: {str(e)}")
+        logger.error("Failed to update shift: %s", e, exc_info=True)
+        raise HTTPException(500, detail="Failed to update shift. Please try again or contact support.")
 
 @router.delete("/shifts/{shift_id}", status_code=200)
 async def delete_shift(
@@ -159,5 +217,6 @@ async def delete_shift(
         raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(500, detail=f"Failed to delete shift: {str(e)}")
+        logger.error("Failed to delete shift: %s", e, exc_info=True)
+        raise HTTPException(500, detail="Failed to delete shift. Please try again or contact support.")
 

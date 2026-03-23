@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 import app.db.session as db_session_module
 import services.solver_job_store as job_store_module
 from app.schemas.job import JobStatus
@@ -126,3 +128,33 @@ def test_update_job_completed_maps_infeasible_to_failed(db_session, test_session
     assert job is not None
     assert job.status == JobStatus.FAILED.value
     assert job.result_status == "Infeasible"
+
+
+def test_reap_stale_jobs_uses_explicit_db_session_only(
+    db_session,
+    test_session_id,
+    monkeypatch,
+):
+    job_id = SolverJobStore.create_job(db_session, test_session_id)
+    SolverJobStore.update_job_running(db_session, job_id)
+    db_session.commit()
+    _patch_all_session_factories(monkeypatch)
+
+    stale_started_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+    job = db_session.query(SolverJobModel).filter_by(job_id=job_id).first()
+    assert job is not None
+    job.started_at = stale_started_at
+    db_session.commit()
+
+    reaped_count = SolverJobStore.reap_stale_jobs(
+        db_session,
+        now=datetime.now(timezone.utc),
+    )
+    db_session.commit()
+
+    assert reaped_count == 1
+    db_session.expire_all()
+    job = db_session.query(SolverJobModel).filter_by(job_id=job_id).first()
+    assert job is not None
+    assert job.status == JobStatus.FAILED.value
+    assert job.error_message is not None

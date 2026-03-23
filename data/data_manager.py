@@ -62,18 +62,22 @@ class SchedulingDataManager(IDataManager):
         self._shift_repo = shift_repo
 
         # --- Optimization Indices ---
-        # Structure: TimeWindow -> Dict[SkillName, Dict[Level, Set[Worker]]]
-        # Example: window -> "Cook" -> {5: {w1, w2}, 3: {w3}}
+        # Three-level nested index for O(1) eligible-worker lookups:
+        #   Level 1 (TimeWindow):   which shift time slot?
+        #   Level 2 (SkillName):    which skill is required? (e.g., "Cook", "Waiter")
+        #   Level 3 (SkillLevel):   what minimum proficiency? (e.g., 5)
+        # Example: _availability_index[morning_shift]["Cook"][5] = {worker_a, worker_b}
         self._availability_index: Dict[
             TimeWindow,
             DefaultDict[str, DefaultDict[int, Set[Worker]]]
         ] = {}
 
-        # Reverse Index for O(1) Updates/Removals:
-        # Key: Worker ID -> Value: Set of TimeWindows currently indexed for this worker.
+        # Reverse index: worker_id -> set of TimeWindows they appear in.
+        # Enables O(1) removal of a worker from all window indices when their
+        # skills or availability change (avoids scanning the entire index).
         self._worker_registry: DefaultDict[str, Set[TimeWindow]] = defaultdict(set)
 
-        # Entity Caches for O(1) Retrieval
+        # Flat caches for direct ID-based retrieval (O(1) dict lookup)
         self._worker_cache: Dict[str, Worker] = {}
         self._shift_cache: Dict[str, Shift] = {}
 
@@ -102,14 +106,17 @@ class SchedulingDataManager(IDataManager):
             List[Worker]: A list of unique workers matching all criteria.
         """
         # 1. Lazy Load / Safety Check
-        # If the window isn't indexed, no workers are available in cache.
+        # If this time window was never indexed (no shift covers it), then
+        # by definition no workers are available — short-circuit immediately.
         if time_window not in self._availability_index:
             return []
 
+        # skill_level_map: Dict[SkillName, Dict[Level, Set[Worker]]]
         skill_level_map = self._availability_index[time_window]
 
         # 2. Base Case: No specific skills required
-        # Return all workers available in this window.
+        # Flatten all worker sets across all skills and levels into one set
+        # to get every worker available in this window, regardless of skill.
         if not required_skills:
             all_in_window = set()
             for lvl_map in skill_level_map.values():
@@ -117,33 +124,40 @@ class SchedulingDataManager(IDataManager):
                     all_in_window.update(w_set)
             return list(all_in_window)
 
+        # One set of candidate workers per required skill — will be intersected
         candidate_sets: List[Set[Worker]] = []
 
         # 3. Filter by Skills (Intersection Logic)
+        # For each required skill, collect workers who meet the minimum level.
         for req_skill, min_level in required_skills.items():
-            # Normalize skill name to ensure case-insensitive lookup
+            # Normalize skill name to Title Case for case-insensitive matching
+            # (e.g., "cook" -> "Cook" to match the index keys)
             req_skill = req_skill.strip().title()
 
             if req_skill not in skill_level_map:
-                # Optimization: If NOBODY available has this skill, impossible to fulfill.
+                # Early exit: if NO available worker has this skill at ANY level,
+                # it's impossible to satisfy this requirement — return empty.
                 return []
 
-            # Get the map of {Level -> Set[Workers]} for this skill
+            # levels_map: Dict[Level, Set[Worker]] for this specific skill
             levels_map = skill_level_map[req_skill]
 
-            # Collect all workers with Level >= min_level
+            # Collect all workers whose skill level >= the required minimum.
+            # E.g., if min_level=3, include workers at levels 3, 4, 5, etc.
             valid_workers_for_skill = set()
             for level, workers in levels_map.items():
                 if level >= min_level:
                     valid_workers_for_skill.update(workers)
 
             if not valid_workers_for_skill:
+                # No workers meet this skill threshold — impossible to fulfill
                 return []
 
             candidate_sets.append(valid_workers_for_skill)
 
         # 4. Final Intersection (AND Logic)
-        # Workers must appear in ALL candidate sets.
+        # A worker must possess ALL required skills at their minimum levels.
+        # set.intersection(*candidate_sets) computes the AND across all skill sets.
         if not candidate_sets:
             return []
 
@@ -195,18 +209,20 @@ class SchedulingDataManager(IDataManager):
         """
         logger.info("Refreshing SchedulingDataManager indices from repositories...")
 
-        # 1. Fetch Data from Source
+        # 1. Fetch latest state from the persistence layer (SQL repos or in-memory repos)
         all_workers = self._worker_repo.get_all()
         all_shifts = self._shift_repo.get_all()
 
-        # 2. Reset Caches
+        # 2. Wipe all existing caches and indices to rebuild from scratch
         self._availability_index.clear()
         self._worker_registry.clear()
+        # Build flat O(1) lookup dicts keyed by ID
         self._worker_cache = {w.worker_id: w for w in all_workers}
         self._shift_cache = {s.shift_id: s for s in all_shifts}
 
-        # 3. Identify all relevant time windows
-        # We index windows defined by shifts.
+        # 3. Extract the set of unique TimeWindows from all shifts.
+        # We only index windows that correspond to actual shifts — there's no
+        # value in indexing worker availability for time slots nobody needs.
         unique_windows = {shift.time_window for shift in all_shifts}
 
         # (Optional) We could also index windows where workers are available
@@ -229,9 +245,12 @@ class SchedulingDataManager(IDataManager):
         Args:
             worker (Worker): The worker to add.
         """
+        # Persist to the underlying data store first
         self._worker_repo.add(worker)
 
-        # Write-Through Cache Update
+        # Write-through cache: update both the flat lookup dict AND the
+        # multi-level availability index so future queries see this worker
+        # immediately without needing a full refresh_indices() call.
         self._worker_cache[worker.worker_id] = worker
         self._index_worker_safely(worker)
 
@@ -243,10 +262,12 @@ class SchedulingDataManager(IDataManager):
         """
         self._worker_repo.update(worker)
 
-        # Update Cache
+        # Update the flat cache with the new worker object
         self._worker_cache[worker.worker_id] = worker
 
-        # Re-index: Remove old entries -> Add new entries
+        # Re-index: must remove stale entries first (old skills/availability may
+        # differ), then re-insert with current state. This two-step approach avoids
+        # ghost entries from the worker's previous skill set lingering in the index.
         self._remove_worker_from_index(worker.worker_id)
         self._index_worker_safely(worker)
 
@@ -288,16 +309,19 @@ class SchedulingDataManager(IDataManager):
         )
 
         for worker in workers:
+            # Check if this worker's declared availability overlaps this window
             if worker.is_available_for_shift(window):
-                # 1. Index every skill the worker has
+                # 1. Index every skill the worker has at its current level.
+                #    E.g., worker with skills {"Cook": 5, "Waiter": 3} gets inserted into
+                #    index_map["Cook"][5] and index_map["Waiter"][3].
                 for skill_name, level in worker.skills.items():
                     index_map[skill_name][level].add(worker)
 
-                # 2. Track general availability (even for unskilled workers)
-                # We update the reverse registry here to ensure we know
-                # this worker is "active" in this window.
+                # 2. Update the reverse registry so _remove_worker_from_index()
+                #    can find and clean up this worker's entries efficiently.
                 self._worker_registry[worker.worker_id].add(window)
 
+        # Store the fully built index for this window
         self._availability_index[window] = index_map
 
     def _index_worker_safely(self, worker: Worker) -> None:
@@ -325,21 +349,25 @@ class SchedulingDataManager(IDataManager):
         Args:
             worker_id (str): The ID of the worker to remove.
         """
+        # Use the reverse registry to find ONLY the windows this worker appears
+        # in, avoiding a costly full scan of every window in the index.
         windows_to_check = self._worker_registry.get(worker_id, set())
 
         for window in windows_to_check:
             if window in self._availability_index:
                 skill_level_map = self._availability_index[window]
 
+                # Walk every skill -> level -> worker_set in this window
+                # and remove the target worker from each set it appears in.
                 for level_map in skill_level_map.values():
                     for w_set in level_map.values():
-                        # Efficiently remove the worker by ID
-                        # (Requires Worker objects to be hashable/equal by ID)
+                        # Build a removal list first to avoid mutating the set
+                        # during iteration (Worker.__eq__ compares by worker_id)
                         to_remove = [w for w in w_set if w.worker_id == worker_id]
                         for w in to_remove:
                             w_set.discard(w)
 
-        # Clear the reverse registry entry
+        # Clear the reverse registry entry so future lookups don't find stale refs
         if worker_id in self._worker_registry:
             del self._worker_registry[worker_id]
 
@@ -379,20 +407,25 @@ class InMemoryDataManager(IDataManager):
             time_window: TimeWindow,
             required_skills: Optional[Dict[str, int]] = None
     ) -> List[Worker]:
-        """Linearly scans workers to find matches (O(N))."""
+        """Linearly scans workers to find matches (O(N)).
+
+        Unlike SchedulingDataManager which uses a pre-built index for O(1) lookups,
+        this implementation brute-forces availability and skill checks. Acceptable
+        for small test datasets where indexing overhead isn't justified.
+        """
         eligible = []
         for worker in self._workers:
-            # 1. Check Availability
+            # 1. Hard constraint: worker must be available during this time window
             if not worker.is_available_for_shift(time_window):
                 continue
 
-            # 2. Check Skill Levels
+            # 2. Hard constraint: worker must have ALL required skills at minimum levels
             if required_skills:
                 meets_criteria = True
                 for s_name, min_lvl in required_skills.items():
                     if not worker.has_skill_at_level(s_name, min_lvl):
                         meets_criteria = False
-                        break
+                        break  # Fail fast — one missing skill disqualifies
                 if not meets_criteria:
                     continue
 
@@ -400,9 +433,9 @@ class InMemoryDataManager(IDataManager):
 
         return eligible
 
-    # Stubs for write methods (In-Memory usually doesn't need persistence logic)
+    # Stubs for write methods — in-memory adapter has no persistence layer to sync
     def add_worker(self, worker: Worker): self._workers.append(worker)
     def add_shift(self, shift: Shift): self._shifts.append(shift)
-    def update_worker(self, worker: Worker): pass
-    def refresh_indices(self): pass
+    def update_worker(self, worker: Worker): pass  # No index to invalidate
+    def refresh_indices(self): pass  # No index to rebuild
     def get_statistics(self): return {}

@@ -87,12 +87,30 @@ const ShiftDetailsModal = ({ isOpen, onClose, shift, workers = [] }) => {
 
     const { shiftName, timeRange, assignments = [] } = shift;
 
-    // Create a worker lookup map
-    const workerMap = {};
+    // Primary lookup keyed strictly by worker_id (unique, no collisions).
+    // Name-based lookup is done via explicit array search to avoid
+    // duplicate names silently overwriting valid entries.
+    const workerByIdMap = {};
     workers.forEach(w => {
-        workerMap[w.name] = w;
-        workerMap[w.worker_id] = w;
+        if (w.worker_id) workerByIdMap[w.worker_id] = w;
     });
+
+    const findWorkerData = (assign) => {
+        // Prefer ID-based O(1) lookup — always unambiguous
+        if (assign.worker_id && workerByIdMap[assign.worker_id]) {
+            return workerByIdMap[assign.worker_id];
+        }
+        // Legacy fallback: ambiguity-safe name lookup.
+        // If multiple workers share the name, return null rather than
+        // guessing and displaying the wrong worker's skills/availability.
+        if (assign.worker_name) {
+            const candidates = workers.filter(w => w.name === assign.worker_name);
+            if (candidates.length === 1) return candidates[0];
+            // 0 matches → unknown worker; 2+ matches → ambiguous; either way, null.
+            return null;
+        }
+        return null;
+    };
 
     // Group assignments by task
     const taskGroups = {};
@@ -200,7 +218,7 @@ const ShiftDetailsModal = ({ isOpen, onClose, shift, workers = [] }) => {
                         </h3>
                         <div className="space-y-4">
                             {assignments.map((assign, idx) => {
-                                const workerData = workerMap[assign.worker_name] || workerMap[assign.worker_id];
+                                const workerData = findWorkerData(assign);
                                 const workerSkills = workerData?.attributes?.skills || {};
                                 const workerAvailability = workerData?.attributes?.availability || {};
                                 const requiredSkills = parseRoleSkills(assign.role_details);

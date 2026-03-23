@@ -28,14 +28,16 @@ def create_mock_data() -> Dict[str, Any]:
     """
 
     # --- 1. Create Workers ---
+    # Each worker has skills (what they can do), talents (proficiency level),
+    # and time preferences (soft constraints that influence the solver's scoring).
 
     # Worker 1: The Head Chef (Expensive, likes mornings, hates evenings)
     w_chef = Worker(name="Gordon", worker_id="101")
     w_chef.add_skill(Skill.CHEF)
-    w_chef.add_talent(Talent.SENIOR)
-    w_chef.add_talent(Talent.LEADER)
-    w_chef.add_preferred_hours(8, 14, weight=20)  # Strongly wants morning
-    w_chef.add_unwanted_hours(16, 23, penalty=20)  # Strongly dislikes evening
+    w_chef.add_talent(Talent.SENIOR)    # High proficiency tier
+    w_chef.add_talent(Talent.LEADER)    # Can manage a team
+    w_chef.add_preferred_hours(8, 14, weight=20)  # +20 soft score for morning assignment
+    w_chef.add_unwanted_hours(16, 23, penalty=20)  # -20 soft penalty for evening assignment
 
     # Worker 2: The Sous Chef (Flexible, fast)
     w_sous = Worker(name="Ramsay", worker_id="102")
@@ -63,16 +65,20 @@ def create_mock_data() -> Dict[str, Any]:
     workers = [w_chef, w_sous, w_cook, w_waiter1, w_waiter2]
 
     # --- 2. Create Tasks & Options ---
+    # Tasks define WHAT needs to be done. Each task has one or more Options
+    # (alternative staffing configurations). The solver picks exactly one option
+    # per task to satisfy the requirement.
 
     # Task A: Kitchen Management (Requires high skill)
     task_kitchen = Task(name="Kitchen Lead")
 
-    # Option 1: 1 Senior Chef (Ideal)
+    # Option 1: 1 Senior Chef (Ideal) — preference_score=10 makes solver prefer this
     opt_k1 = TaskOption(preference_score=10)
     opt_k1.add_requirement(count=1, skills=[Skill.CHEF], talents=[Talent.SENIOR])
 
-    # Option 2: 1 Sous Chef + 1 Cook (Fallback)
-    opt_k2 = TaskOption(preference_score=0)  # Less preferred
+    # Option 2: 1 Sous Chef + 1 Cook (Fallback) — score=0 means solver only picks
+    # this if Option 1 is infeasible (no senior chef available)
+    opt_k2 = TaskOption(preference_score=0)
     opt_k2.add_requirement(count=1, skills=[Skill.SOUS_CHEF])
     opt_k2.add_requirement(count=1, skills=[Skill.COOK])
 
@@ -86,9 +92,11 @@ def create_mock_data() -> Dict[str, Any]:
     task_service.add_option(opt_s1)
 
     # --- 3. Create Shifts ---
+    # Shifts define WHEN work happens. Each shift has a time window and
+    # one or more tasks that need to be staffed during that window.
 
-    # Sunday
-    base_date = datetime(2024, 1, 1)  # Arbitrary date
+    # Use canonical epoch anchor date (Monday 2024-01-01) as the base
+    base_date = datetime(2024, 1, 1)
 
     # Shift 1: Morning (08:00 - 14:00)
     morning_win = TimeWindow(

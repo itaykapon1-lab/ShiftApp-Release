@@ -391,9 +391,10 @@ class TestTaskHydration:
         req1 = loaded_option1.requirements[0]
         assert isinstance(req1, Requirement)
         assert req1.count == 1
-        assert "chef" in req1.required_skills
-        assert req1.required_skills["chef"] == 5
-        assert "manager" in req1.required_skills
+        # Skill keys are normalized to Title Case by Requirement.__post_init__
+        assert "Chef" in req1.required_skills
+        assert req1.required_skills["Chef"] == 5
+        assert "Manager" in req1.required_skills
         
         # Verify Option 2
         loaded_option2 = loaded_task.options[1]

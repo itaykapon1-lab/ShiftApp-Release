@@ -2,7 +2,7 @@
 // SHIFTS TAB - Shifts Table & Logic (FIXED)
 // ========================================
 
-import React from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { CalendarPlus, Edit, Trash2, AlertCircle } from 'lucide-react';
 import { HelpButton } from '../../help';
 
@@ -104,8 +104,35 @@ const formatShiftNeeds = (shift) => {
  * ShiftsTab Component
  */
 const ShiftsTab = ({ shifts, onAddShift, onEditShift, onDeleteShift }) => {
+    const duplicateNamesByDay = useMemo(() => {
+        const counts = {};
+
+        shifts.forEach((shift) => {
+            const day = formatShiftDay(shift);
+            const name = shift.name || 'Unnamed';
+            const key = `${day}::${name}`;
+            counts[key] = (counts[key] || 0) + 1;
+        });
+
+        return counts;
+    }, [shifts]);
+
+    const getShiftDisplayName = useCallback((shift) => {
+        const day = formatShiftDay(shift);
+        const name = shift.name || 'Unnamed';
+        const key = `${day}::${name}`;
+
+        if ((duplicateNamesByDay[key] || 0) > 1) {
+            return `${name} (${formatShiftTime(shift)})`;
+        }
+
+        return name;
+    }, [duplicateNamesByDay]);
+
     const handleDelete = async (shift) => {
-        const confirmed = window.confirm(`Are you sure you want to delete ${shift.name}?`);
+        const timeInfo = formatShiftTime(shift);
+        const displayName = getShiftDisplayName(shift);
+        const confirmed = window.confirm(`Are you sure you want to delete "${displayName}" (${timeInfo})?`);
         if (!confirmed) return;
 
         try {
@@ -161,7 +188,7 @@ const ShiftsTab = ({ shifts, onAddShift, onEditShift, onDeleteShift }) => {
                                 >
                                     {/* REMOVED: ID column */}
                                     <td className="py-5 px-6 font-black text-lg text-gray-900">
-                                        {s.name || 'Unnamed'}
+                                        {getShiftDisplayName(s)}
                                     </td>
                                     <td className="py-5 px-6">
                                         <span className="px-3 py-1 bg-gradient-to-r from-indigo-500 to-blue-500 text-white rounded-full text-sm font-bold shadow-md">

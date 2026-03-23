@@ -8,6 +8,7 @@ It implements the IDataManager protocol and handles complex parsing logic for:
 - Data Normalization and Validation
 """
 
+import logging
 import re
 import pandas as pd
 import numpy as np
@@ -20,6 +21,8 @@ from domain.worker_model import Worker
 from domain.shift_model import Shift, TimeWindow
 from domain.task_model import Task, TaskOption, Requirement
 from solver.constraints.static_soft import WorkerPreferencesConstraint
+
+logger = logging.getLogger(__name__)
 
 # --- Configuration Constants ---
 PREF_SCORE_BONUS = 10    # Value for '*'
@@ -39,26 +42,30 @@ class ExcelDataManager:
             start_date: Reference date for 'Sunday'. Defaults to the upcoming Sunday.
         """
         self.file_path = file_path
+        # Anchor date for mapping day names to concrete datetimes.
+        # Defaults to the upcoming Sunday if not provided.
         self.start_date = start_date or self._get_next_sunday()
 
-        # Internal In-Memory Cache
-        self._workers: Dict[str, Worker] = {}
-        self._shifts: Dict[str, Shift] = {}
-        self._constraints_data: List[Dict] = [] # Raw constraints for the Solver
+        # Internal In-Memory Cache — populated by _load_data() below
+        self._workers: Dict[str, Worker] = {}   # Keyed by worker_id for O(1) lookup
+        self._shifts: Dict[str, Shift] = {}     # Keyed by shift_id for O(1) lookup
+        self._constraints_data: List[Dict] = [] # Raw constraint rows for later registry building
 
-        # Trigger Load
+        # Trigger full Excel parsing on construction
         self._load_data()
 
     def _get_next_sunday(self) -> datetime:
         """Calculates the date of the upcoming Sunday (at 00:00)."""
         today = datetime.now()
+        # Python weekday: Monday=0 ... Sunday=6
+        # Formula: how many days from today until the next Sunday (weekday 6)
         days_ahead = (6 - today.weekday() + 7) % 7
         return (today + timedelta(days=days_ahead)).replace(hour=0, minute=0, second=0, microsecond=0)
 
     def _load_data(self):
         """Main orchestration method for loading Excel sheets."""
         try:
-            print(f"📂 Loading data from: {self.file_path}")
+            logger.info("Loading data from: %s", self.file_path)
             xls = pd.ExcelFile(self.file_path)
 
             # 1. Parse Workers
@@ -77,16 +84,16 @@ class ExcelDataManager:
             if 'Constraints' in xls.sheet_names:
                 self._parse_constraints(pd.read_excel(xls, 'Constraints'))
 
-            print(f"✅ Data Loaded Successfully:")
-            print(f"   - Workers: {len(self._workers)}")
-            print(f"   - Shifts:  {len(self._shifts)}")
-            print(f"   - Constraints: {len(self._constraints_data)}")
+            logger.info(
+                "Data loaded successfully: Workers=%d, Shifts=%d, Constraints=%d",
+                len(self._workers), len(self._shifts), len(self._constraints_data),
+            )
 
         except FileNotFoundError:
-            print(f"❌ Error: File not found at {self.file_path}")
+            logger.error("File not found at %s", self.file_path)
             raise
         except Exception as e:
-            print(f"❌ Critical Parsing Error: {e}")
+            logger.error("Critical parsing error: %s", e, exc_info=True)
             raise
 
     # =========================================================================
@@ -94,25 +101,26 @@ class ExcelDataManager:
     # =========================================================================
 
     def _parse_workers(self, df: pd.DataFrame):
+        # Ordered list matching Excel column order: Sunday=index 0, Saturday=index 6
         days_map = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
         for idx, row in df.iterrows():
             try:
-                # Basic ID Validation
+                # Basic ID Validation — skip rows with missing/empty Worker ID
                 w_id = str(row['Worker ID']).strip()
                 if not w_id or w_id.lower() == 'nan':
-                    continue
+                    continue  # Blank row in Excel — skip silently
 
-                # Handle Optional Wage (NaN -> 0.0)
+                # Handle Optional Wage — pandas reads empty cells as NaN
                 wage_val = row.get('Wage')
                 wage = 0.0
                 if pd.notna(wage_val):
                     try:
                         wage = float(wage_val)
                     except ValueError:
-                        pass # Keep 0.0 if invalid
+                        pass # Keep 0.0 if cell contains non-numeric text
 
-                # Create Worker Entity
+                # Construct the domain Worker object from the Excel row
                 worker = Worker(
                     name=str(row['Name']).strip(),
                     worker_id=w_id,
@@ -121,22 +129,25 @@ class ExcelDataManager:
                     max_hours=int(row.get('Max Hours', 40))
                 )
 
-                # Parse Skills: "Cook:5, French:3"
+                # Parse Skills column: comma-separated "SkillName:Level" pairs
+                # e.g., "Cook:5, French:3" -> {Cook: 5, French: 3}
                 skills_str = str(row.get('Skills', ''))
                 if skills_str.lower() != 'nan':
                     for part in skills_str.split(','):
                         self._parse_single_skill(worker, part)
 
-                # Parse Availability (Days columns)
+                # Parse per-day availability columns (Sunday through Saturday)
+                # Each cell contains a time range like "08:00-16:00" or "OFF"
                 for day_idx, day_name in enumerate(days_map):
                     if day_name in df.columns:
                         val = str(row[day_name])
                         self._parse_availability_cell(worker, val, day_idx)
 
+                # Store in the in-memory cache keyed by worker_id
                 self._workers[w_id] = worker
 
             except Exception as e:
-                print(f"⚠️ Error parsing worker row {idx}: {e}")
+                logger.warning("Error parsing worker row %d: %s", idx, e)
 
     def _parse_single_skill(self, worker: Worker, raw_skill: str):
         """Parses 'SkillName:Level' or just 'SkillName'."""
@@ -152,131 +163,150 @@ class ExcelDataManager:
             try:
                 level = int(parts[1])
             except ValueError:
-                print(f"   ⚠️ Invalid skill level in '{raw_skill}' for {worker.name}. Defaulting to {level}.")
+                logger.warning(
+                    "Invalid skill level in '%s' for %s, defaulting to %d",
+                    raw_skill, worker.name, level,
+                )
 
         # Normalize Name (Title Case)
         worker.set_skill_level(self._normalize_text(name), level)
 
     def _parse_availability_cell(self, worker: Worker, value: str, day_offset: int):
         """Parses '08:00-16:00', 'OFF', or variants with * / !"""
+        # Explicitly absent — worker is not available this day
         if value.upper() in ['OFF', 'NAN', '', 'NONE']:
             return
 
-        # Check for Preferences
+        # Detect preference markers: '*' = wants this shift, '!' = dislikes this shift
         score = 0
         clean_value = value
 
         if '*' in value:
-            score = PREF_SCORE_BONUS
+            score = PREF_SCORE_BONUS     # +10 bonus for preferred time slots
             clean_value = value.replace('*', '')
         elif '!' in value:
-            score = PREF_SCORE_PENALTY
+            score = PREF_SCORE_PENALTY   # -10 penalty for disliked time slots
             clean_value = value.replace('!', '')
 
         clean_value = clean_value.strip()
 
         try:
+            # Split "08:00-16:00" into start and end time strings
             start_str, end_str = clean_value.split('-')
 
-            # Date Calculation
+            # Calculate the concrete date by offsetting from the week anchor
+            # day_offset 0 = Sunday, 1 = Monday, ..., 6 = Saturday
             base_date = self.start_date + timedelta(days=day_offset)
             start_dt = self._combine_dt(base_date, start_str)
             end_dt = self._combine_dt(base_date, end_str)
 
-            # Handle Overnight (End < Start)
+            # Handle overnight shifts (e.g., 22:00-06:00 where end < start)
             if end_dt <= start_dt:
                 end_dt += timedelta(days=1)
 
-            # Add Hard Constraint (Availability)
+            # Register as hard constraint: worker CAN work during this window
             window = TimeWindow(start_dt, end_dt)
             worker.add_availability(window.start, window.end)
 
-            # Add Soft Constraint (Preference) if applicable
+            # Register as soft constraint if preference marker was present
             if score != 0:
                 worker.add_preference(window, score)
 
-        except Exception:
-            print(f"   ⚠️ Invalid time format '{value}' for worker {worker.name}")
+        except (ValueError, TypeError, IndexError):
+            logger.warning("Invalid time format '%s' for worker %s", value, worker.name)
 
     # =========================================================================
     # Parsing Logic: Shifts & Tasks
     # =========================================================================
 
     def _parse_shifts(self, df: pd.DataFrame):
+        # Map day names to their offset from the week start (Sunday=0)
         days_map = {'Sunday': 0, 'Monday': 1, 'Tuesday': 2, 'Wednesday': 3,
                     'Thursday': 4, 'Friday': 5, 'Saturday': 6}
 
         for idx, row in df.iterrows():
             try:
                 day_name = self._normalize_text(row['Day'])
-                if day_name not in days_map: continue
+                if day_name not in days_map: continue  # Skip rows with invalid day names
 
-                # Time Window
+                # Build the shift's time window from the day offset and time columns
                 offset = days_map[day_name]
                 base_date = self.start_date + timedelta(days=offset)
                 start_dt = self._combine_dt(base_date, str(row['Start Time']))
                 end_dt = self._combine_dt(base_date, str(row['End Time']))
 
+                # Handle overnight shifts (e.g., 22:00-06:00)
                 if end_dt <= start_dt:
                     end_dt += timedelta(days=1)
 
                 shift = Shift(str(row['Shift Name']), TimeWindow(start_dt, end_dt))
 
-                # Task Parsing
+                # Parse the Tasks column which defines staffing requirements.
+                # Syntax: "[Skill:Level] x Count" with OR for alternatives, + for combined.
                 raw_task = str(row['Tasks'])
                 if raw_task.lower() != 'nan':
-                    # Create a main task container for this shift
+                    # Each shift gets one task container holding all its options
                     task_container = Task(f"Task_{shift.shift_id}")
                     self._parse_complex_task_string(task_container, raw_task)
                     shift.add_task(task_container)
 
+                # Store in in-memory cache keyed by auto-generated shift_id
                 self._shifts[shift.shift_id] = shift
 
             except Exception as e:
-                print(f"⚠️ Error parsing shift row {idx}: {e}")
+                logger.warning("Error parsing shift row %d: %s", idx, e)
 
     def _parse_complex_task_string(self, task: Task, task_str: str):
         """
         Parses logic: "Option A OR Option B"
         Where Option A = "Req 1 + Req 2"
         Where Req 1 = "[Skill:Lvl] x Count"
+
+        Grammar (informal BNF):
+            task_str    ::= option ( "OR" option )*
+            option      ::= requirement ( "+" requirement )*
+            requirement ::= "[" skill_list "]" "x" count
+            skill_list  ::= skill ( "," skill )*
+            skill       ::= name ":" level  |  name
         """
-        # Step 1: Split Options (OR)
+        # Step 1: Split into alternative staffing options (OR = choose one)
         options = task_str.split('OR')
 
         for opt_str in options:
             task_option = TaskOption()
 
-            # Step 2: Split Simultaneous Requirements (+)
+            # Step 2: Split into simultaneous requirements (+ = need all)
             reqs = opt_str.split('+')
 
             for req_str in reqs:
-                # Step 3: Extract Content and Count using Regex
-                # Pattern: "[ Content ] x Count"
+                # Step 3: Regex extracts the bracketed skill list and headcount.
+                # E.g., "[Cook:5, Waiter:3] x 2" -> content="Cook:5, Waiter:3", count=2
                 match = re.search(r"\[(.*?)\]\s*x\s*(\d+)", req_str)
 
                 if match:
                     content_str = match.group(1).strip()
-                    count = int(match.group(2))
+                    count = int(match.group(2))  # How many workers needed
 
-                    # Step 4: Parse Internal Skills (AND logic)
+                    # Step 4: Parse the comma-separated skill:level pairs (AND logic)
+                    # A single worker must possess ALL listed skills at minimum levels
                     required_skills_dict = {}
 
                     if content_str:
-                        # Split "Waiter:5, French:3"
                         skill_items = content_str.split(',')
                         for item in skill_items:
                             item = item.strip()
                             if ':' in item:
+                                # Explicit level: "Cook:5" -> {Cook: 5}
                                 s_name, s_lvl = item.split(':')
                                 required_skills_dict[self._normalize_text(s_name)] = int(s_lvl)
                             else:
+                                # No level specified: default to 1 (any proficiency)
                                 required_skills_dict[self._normalize_text(item)] = 1
 
-                    # Add to Option
+                    # Add this requirement (count workers with these skills) to the option
                     task_option.add_requirement(count, required_skills_dict)
 
-            # Only add option if it has valid requirements
+            # Only add option if it parsed at least one valid requirement
             if task_option.requirements:
                 task.add_option(task_option)
 
@@ -299,21 +329,27 @@ class ExcelDataManager:
         return text.strip().title()
 
     def _combine_dt(self, date_obj: datetime, time_val: Any) -> datetime:
-        """Robustly combines date and time (handles str vs datetime.time)."""
+        """Robustly combines date and time (handles str vs datetime.time).
+
+        Pandas may deliver time values as strings ("08:00"), datetime.time objects,
+        or full datetime objects depending on the Excel cell format. This method
+        handles all three cases.
+        """
         if isinstance(time_val, str):
             # Excel might export "08:00:00" or just "08:00"
             clean = time_val.strip()
-            # Simple fallback if pandas didn't convert it
             try:
+                # Extract hours and minutes, ignore seconds if present
                 parts = clean.split(':')
                 t = time(int(parts[0]), int(parts[1]))
-            except:
-                # Fallback for weird formats, defaulting to 00:00
-                t = time(0,0)
+            except (ValueError, TypeError, IndexError):
+                # Unrecognizable format — default to midnight to avoid crash
+                t = time(0, 0)
         else:
-            # It's already a time object (or datetime)
+            # Pandas already parsed the cell into a time or datetime object
             t = time_val if isinstance(time_val, time) else time_val.time()
 
+        # Combine the base date (from day offset) with the parsed time
         return datetime.combine(date_obj.date(), t)
 
     # =========================================================================
@@ -323,22 +359,26 @@ class ExcelDataManager:
     def get_eligible_workers(self, time_window: TimeWindow, required_skills: Optional[Dict[str, int]] = None) -> List[Worker]:
         """
         Returns workers who are available AND meet skill thresholds.
+
+        Linear scan (O(N)) — acceptable for file-backed datasets where the worker
+        count is small (typically < 100). For larger datasets, use
+        SchedulingDataManager which provides indexed O(1) lookups.
         """
         eligible = []
         for worker in self._workers.values():
-            # 1. Hard Constraint: Availability
+            # 1. Hard Constraint: worker must be available during this time window
             if not worker.is_available_for_shift(time_window):
                 continue
 
-            # 2. Hard Constraint: Skills (Threshold Check)
+            # 2. Hard Constraint: worker must have ALL required skills at min levels
             if required_skills:
                 meets_skills = True
                 for s_name, min_lvl in required_skills.items():
-                    # Normalize key for lookup
+                    # Normalize skill name to Title Case for case-insensitive matching
                     norm_name = self._normalize_text(s_name)
                     if not worker.has_skill_at_level(norm_name, min_lvl):
                         meets_skills = False
-                        break
+                        break  # Fail fast — one missing skill disqualifies
 
                 if not meets_skills:
                     continue
@@ -367,27 +407,38 @@ class ExcelDataManager:
         }
 
     def build_constraint_registry(self):
-        """Builds a ConstraintRegistry from the parsed constraints data."""
+        """Builds a ConstraintRegistry from the parsed constraints data.
+
+        Two-phase process:
+        1. Classify raw constraint rows from Excel into typed lists
+        2. Instantiate concrete constraint objects and register them
+        """
+        # Lazy imports to avoid circular dependencies at module load time
         from solver.constraints.registry import ConstraintRegistry
         from solver.constraints.config import ConstraintConfig
         from solver.constraints.base import ConstraintType
         from solver.constraints.dynamic import MutualExclusionConstraint, CoLocationConstraint
         from solver.constraints.static_soft import WorkerPreferencesConstraint
 
-        
+        # Initialize with built-in structural constraints (coverage, etc.)
         registry = ConstraintRegistry()
         registry.add_core_constraints()
+        # Always register the preferences constraint so worker time preferences
+        # (from '*' and '!' markers) are applied as soft penalties
         registry.register(WorkerPreferencesConstraint())
-        # Parse constraints from Excel data
-        mutual_exclusions = []
-        colocations = []
-        
+
+        # Phase 1: Classify raw Excel constraint rows by type
+        mutual_exclusions = []  # "Worker A and Worker B must NOT share a shift"
+        colocations = []        # "Worker A and Worker B MUST share a shift"
+
         for constraint_row in self._constraints_data:
             constraint_type = constraint_row.get('Type', '').strip()
             strictness_str = constraint_row.get('Strictness', 'Hard').strip()
+            # Map Excel "Hard"/"Soft" text to the ConstraintType enum
             strictness = ConstraintType.HARD if strictness_str.lower() == 'hard' else ConstraintType.SOFT
-            
+
             if constraint_type == 'Mutual Exclusion':
+                # Business rule: two workers cannot be scheduled in the same shift
                 subject = constraint_row.get('Subject', '').strip()
                 target = constraint_row.get('Target', '').strip()
                 if subject and target:
@@ -397,22 +448,23 @@ class ExcelDataManager:
                         'strictness': strictness
                     })
             elif constraint_type == 'Co-Location':
+                # Business rule: two workers must be scheduled together
                 subject = constraint_row.get('Subject', '').strip()
                 target = constraint_row.get('Target', '').strip()
                 if subject and target:
                     colocations.append({
-                        'leader': subject,
-                        'follower': target,
+                        'leader': subject,    # The "anchor" worker
+                        'follower': target,   # Must follow the leader
                         'strictness': strictness
                     })
-        
-        # Build registry using ConstraintConfig pattern
+
+        # Build a ConstraintConfig DTO (used by the deprecated config path)
         config = ConstraintConfig(
             mutual_exclusions=mutual_exclusions,
             colocations=colocations
         )
-        
-        # Register dynamic constraints
+
+        # Phase 2: Register concrete dynamic constraint instances
         for rule in mutual_exclusions:
             constraint = MutualExclusionConstraint(
                 worker_a_id=rule['worker_a'],
@@ -420,7 +472,7 @@ class ExcelDataManager:
                 strictness=rule['strictness']
             )
             registry.register(constraint)
-        
+
         for rule in colocations:
             constraint = CoLocationConstraint(
                 worker_a_id=rule['leader'],
@@ -428,7 +480,7 @@ class ExcelDataManager:
                 strictness=rule['strictness']
             )
             registry.register(constraint)
-        
+
         return registry
 
     # Write methods are stubs in this File-Read-Only implementation

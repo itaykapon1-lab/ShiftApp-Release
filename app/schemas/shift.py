@@ -7,8 +7,8 @@ CRITICAL: All dates are normalized to the Canonical Epoch Week (Jan 1-7, 2024)
 to prevent "Date Drift" bugs.
 """
 
-from typing import Dict, Optional, Any
-from pydantic import BaseModel, Field, field_validator
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field, field_validator, model_validator
 from app.utils.date_normalization import normalize_to_canonical_week
 
 
@@ -67,6 +67,29 @@ class ShiftCreate(BaseModel):
             return v
         normalized = normalize_to_canonical_week(v)
         return normalized.isoformat()
+
+    @model_validator(mode="after")
+    def normalize_task_skill_keys(self) -> "ShiftCreate":
+        """Normalize required_skills keys to Title Case in tasks_data.
+
+        Ensures case-insensitive skill matching with Worker skills, which are
+        normalized to Title Case by ``Worker.set_skill_level()``.  This prevents
+        a mismatch where e.g. ``"cook"`` in a task fails to match ``"Cook"`` on
+        a worker, causing false "SKILL GAP" errors in the solver preflight.
+        """
+        if not self.tasks_data:
+            return self
+        tasks: List[Dict[str, Any]] = self.tasks_data.get("tasks", [])
+        for task in tasks:
+            for option in task.get("options", []):
+                for req in option.get("requirements", []):
+                    raw_skills: Dict[str, Any] = req.get("required_skills", {})
+                    if raw_skills:
+                        req["required_skills"] = {
+                            k.strip().title(): v
+                            for k, v in raw_skills.items()
+                        }
+        return self
 
 
 class ShiftRead(BaseModel):

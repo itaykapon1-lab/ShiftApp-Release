@@ -15,6 +15,8 @@ invisible to the test's DB queries.
 The `lifecycle_session` fixture below handles this patching transparently.
 """
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from sqlalchemy.orm import sessionmaker
 
@@ -290,3 +292,35 @@ def test_get_latest_completed_job_returns_most_recent(lifecycle_session, session
         )
     finally:
         db2.close()
+
+
+def test_stale_running_job_can_be_reaped_via_job_store(lifecycle_session, session_id_factory):
+    db, factory = lifecycle_session
+    session_id = session_id_factory("solver-stale")
+    job_id = SolverJobStore.create_job(db, session_id)
+
+    db_running = factory()
+    SolverJobStore.update_job_running(db_running, job_id)
+    db_running.commit()
+    db_running.close()
+
+    db_stale = factory()
+    job = db_stale.query(SolverJobModel).filter_by(job_id=job_id).first()
+    assert job is not None
+    job.started_at = datetime.now(timezone.utc) - timedelta(minutes=10)
+    db_stale.commit()
+
+    reaped_count = SolverJobStore.reap_stale_jobs(db_stale, now=datetime.now(timezone.utc))
+    db_stale.commit()
+    db_stale.close()
+
+    assert reaped_count == 1
+
+    db_verify = factory()
+    try:
+        reaped_job = SolverJobStore.get_job(db_verify, job_id)
+        assert reaped_job is not None
+        assert reaped_job["status"] == JobStatus.FAILED
+        assert reaped_job["error_message"] is not None
+    finally:
+        db_verify.close()

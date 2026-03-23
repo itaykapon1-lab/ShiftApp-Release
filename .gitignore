@@ -40,6 +40,8 @@ frontend/build/
 .coverage
 htmlcov/
 .tox/
+.test_tmp/
+.codex_tmp/
 
 # ===== Logs =====
 *.log
@@ -51,3 +53,9 @@ Thumbs.db
 
 # ===== Docker (local volumes) =====
 pgdata/
+
+# ===== AI Agent / Local Dev =====
+.claude/
+.qodo/
+CLAUDE.md
+DEEPDIVE/

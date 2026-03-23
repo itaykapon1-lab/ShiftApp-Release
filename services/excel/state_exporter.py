@@ -43,9 +43,11 @@ class StateExporter:
         from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
         from openpyxl.utils import get_column_letter
 
+        # Create a new workbook with three sheets that mirror the import format.
+        # This enables round-trip workflows: export → edit in Excel → re-import.
         wb = Workbook()
 
-        # Style definitions
+        # Professional styling — matches the schedule export aesthetics.
         header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
         header_font = Font(color="FFFFFF", bold=True, size=11)
         border_thin = Border(
@@ -55,16 +57,16 @@ class StateExporter:
             bottom=Side(style='thin')
         )
 
-        # Sheet 1: Workers
+        # Sheet 1: Workers — same column layout the importer expects.
         ws_workers = wb.active
         ws_workers.title = "Workers"
         self._write_workers_sheet(ws_workers, header_fill, header_font, border_thin)
 
-        # Sheet 2: Shifts
+        # Sheet 2: Shifts — Day, Shift Name, Start Time, End Time, Tasks.
         ws_shifts = wb.create_sheet("Shifts")
         self._write_shifts_sheet(ws_shifts, header_fill, header_font, border_thin)
 
-        # Sheet 3: Constraints
+        # Sheet 3: Constraints — Type, Subject, Target, Value, Strictness, Penalty.
         ws_constraints = wb.create_sheet("Constraints")
         self._write_constraints_sheet(ws_constraints, header_fill, header_font, border_thin)
 
@@ -99,34 +101,39 @@ class StateExporter:
 
         workers = self.worker_repo.get_all()
         for w in workers:
-            # Format skills: "Skill1:Level,Skill2:Level"
+            # Format skills as comma-separated "Skill:Level" pairs.
+            # Example: "Cook:5,Waiter:3" — matches the import parser's expectation.
             skills_str = ",".join(f"{s}:{l}" for s, l in w.skills.items()) if w.skills else ""
 
-            # Format availability per day
+            # Base row: static worker attributes.
             row = [
                 w.worker_id, w.name, w.wage, w.min_hours, w.max_hours, skills_str
             ]
 
-            # Get raw availability data for formatting
+            # Convert the worker's availability TimeWindows and preferences back
+            # into the dict format used by the Excel columns (one column per day).
             raw_avail = self.worker_repo._convert_availability_to_dict_format(
                 w.availability, w.preferences
             )
+            # Day abbreviations match the keys used in raw_avail; full names are
+            # for the column headers (Sunday through Saturday).
             days = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]
             day_full = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 
             for day_abbr, day_name in zip(days, day_full):
                 day_data = raw_avail.get(day_abbr, None)
                 if not day_data:
-                    row.append("OFF")
+                    row.append("OFF")  # No availability = day off
                 elif isinstance(day_data, str):
-                    row.append(day_data)
+                    row.append(day_data)  # Already formatted (e.g., "08:00-16:00")
                 elif isinstance(day_data, dict):
                     time_range = day_data.get("timeRange", "08:00-16:00")
                     pref = day_data.get("preference", "NEUTRAL")
+                    # Append preference markers that the importer recognises:
                     if pref == "HIGH":
-                        time_range += "*"  # Preferred marker
+                        time_range += "*"  # * = worker prefers this shift (+bonus)
                     elif pref == "LOW":
-                        time_range += "!"  # Avoid marker
+                        time_range += "!"  # ! = worker wants to avoid this shift (-penalty)
                     row.append(time_range)
                 else:
                     row.append("OFF")
@@ -150,23 +157,27 @@ class StateExporter:
 
         shifts = self.shift_repo.get_all()
         for s in shifts:
-            # Get day name from start time
+            # Derive the day-of-week name from the canonical epoch datetime.
+            # Python's weekday(): Mon=0..Sun=6, so this maps correctly.
             day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
             day = day_names[s.time_window.start.weekday()]
 
             # Format times.
+            # Same-day shifts: straightforward HH:MM format.
             # Overnight shifts (end date > start date) use the +24h convention:
             # e.g. a shift starting Monday 22:00 and ending Tuesday 06:00 is
             # written as Start="22:00", End="30:00".  This is lossless and
             # unambiguous — the validator and parser both accept this notation.
             start_str = s.time_window.start.strftime("%H:%M")
             if s.time_window.end.date() > s.time_window.start.date():
+                # Overnight: add 24 to the end hour to produce +24h notation.
                 overnight_hours = s.time_window.end.hour + 24
                 end_str = f"{overnight_hours:02d}:{s.time_window.end.strftime('%M')}"
             else:
                 end_str = s.time_window.end.strftime("%H:%M")
 
-            # Serialize tasks to string format: [Skill:Level] x Count OR [Skill2] x Count2
+            # Serialize the shift's task definitions back to the grammar string
+            # format: "#1: [Skill:Level] x Count | #2: [Skill2:Level] x Count2"
             tasks_str = self._serialize_tasks_to_string(s.tasks) if s.tasks else ""
 
             ws.append([day, s.name, start_str, end_str, tasks_str])
@@ -195,22 +206,30 @@ class StateExporter:
         for task in tasks:
             option_parts = []
             for option_index, option in enumerate(task.options, start=1):
+                # Build the requirement brackets for this option.
+                # Each requirement: "[Skill:Level, Skill2:Level] x Count"
                 req_parts = []
                 for req in option.requirements:
                     skills_str = ", ".join(
                         f"{name}:{level}" for name, level in req.required_skills.items()
                     ) if req.required_skills else ""
                     req_parts.append(f"[{skills_str}] x {req.count}")
-                body = " + ".join(req_parts) if req_parts else "[General:1] x 1"
+                # Join multiple requirements within one option with " + " (AND).
+                body = " + ".join(req_parts) if req_parts else "[] x 1"
 
+                # Use the option's stored priority, falling back to its positional
+                # index if the priority is missing or invalid.
                 priority = getattr(option, 'priority', None)
                 if not isinstance(priority, int) or priority < 1:
                     priority = option_index
+                # Prefix with "#N:" so the parser can reconstruct option ordering.
                 option_parts.append(f"#{priority}: {body}")
 
             if option_parts:
+                # Options within a task are space-separated (the parser splits on #N:).
                 task_parts.append(" ".join(option_parts))
 
+        # Tasks within a shift are pipe-separated.
         return " | ".join(task_parts)
 
     def _write_constraints_sheet(self, ws, header_fill, header_font, border_thin):
@@ -224,16 +243,18 @@ class StateExporter:
             cell.font = header_font
             cell.border = border_thin
 
-        # Load constraints from SessionConfig
+        # Load the session's persisted constraint config from the DB.
+        # Each constraint is a JSON dict with {category, type, params, ...}.
         config = self.db.query(SessionConfigModel).filter_by(
             session_id=self.session_id
         ).first()
 
         if not config or not config.constraints:
-            return
+            return  # No constraints to export
 
         constraints = config.constraints if isinstance(config.constraints, list) else []
 
+        # Convert each canonical constraint back to the flat Excel row format.
         for c in constraints:
             row = self._constraint_to_excel_row(c)
             if row:
@@ -251,12 +272,13 @@ class StateExporter:
         Returns:
             list: [Type, Subject, Target, Value, Strictness, Penalty] or None
         """
-        category = constraint.get("category")
-        params = constraint.get("params", {})
+        category = constraint.get("category")   # Canonical key, e.g., "mutual_exclusion"
+        params = constraint.get("params", {})    # Constraint-specific parameters
         strictness_raw = str(constraint.get("type", "HARD")).strip().upper()
         strictness = strictness_raw if strictness_raw in {"HARD", "SOFT"} else "HARD"
 
-        # Map category back to Excel type name
+        # Reverse mapping: canonical category → user-friendly Excel type name.
+        # This is the inverse of the importer's raw_type_lower matching.
         type_map = {
             "mutual_exclusion":         "Mutual Exclusion",
             "colocation":               "Co-Location",
@@ -268,36 +290,43 @@ class StateExporter:
 
         excel_type = type_map.get(category)
         if not excel_type:
-            return None  # Unknown constraint type
+            return None  # Unrecognised category — skip silently
+
+        # Each constraint category maps its params to specific Excel columns:
+        # [Type, Subject, Target, Value, Strictness, Penalty]
 
         if category == "mutual_exclusion":
+            # Subject = Worker A, Target = Worker B (the banned pair)
             return [
                 excel_type,
                 params.get("worker_a_id", ""),
                 params.get("worker_b_id", ""),
-                "",
+                "",  # Value not used for ban constraints
                 strictness,
                 params.get("penalty", -100)
             ]
         elif category == "colocation":
+            # Subject = Worker A, Target = Worker B (the required pair)
             return [
                 excel_type,
                 params.get("worker_a_id", ""),
                 params.get("worker_b_id", ""),
-                "",
+                "",  # Value not used for pair constraints
                 strictness,
                 params.get("penalty", -100)
             ]
         elif category == "max_hours_per_week":
+            # Value = the hour cap (e.g., 40)
             return [
                 excel_type,
-                "",
-                "",
+                "",  # No subject (applies to all workers)
+                "",  # No target
                 params.get("max_hours", 40),
                 strictness,
                 params.get("penalty", -50)
             ]
         elif category == "avoid_consecutive_shifts":
+            # Value = minimum rest hours between shifts
             return [
                 excel_type,
                 "",
@@ -307,6 +336,7 @@ class StateExporter:
                 params.get("penalty", -30.0),
             ]
         elif category == "worker_preferences":
+            # Subject = preference reward weight, Value = enabled toggle
             return [
                 excel_type,
                 params.get("preference_reward", 10),
@@ -316,6 +346,7 @@ class StateExporter:
                 params.get("preference_penalty", -100),
             ]
         elif category == "task_option_priority":
+            # Always SOFT — penalises non-preferred task options
             return [
                 excel_type,
                 "",

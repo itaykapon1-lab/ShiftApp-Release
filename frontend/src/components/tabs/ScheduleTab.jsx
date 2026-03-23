@@ -501,7 +501,10 @@ const ScoreBreakdownPanel = ({ penaltyBreakdown }) => {
  * - penaltyBreakdown: Object - penalty breakdown by constraint type
  * - workers: Array - all workers (for detailed view in modal)
  */
-const ScheduleTab = ({ assignments = [], objectiveValue, theoreticalMax, penaltyBreakdown, workers = [] }) => {
+const EMPTY_ASSIGNMENTS = [];
+const EMPTY_WORKERS = [];
+
+const ScheduleTab = ({ assignments = EMPTY_ASSIGNMENTS, objectiveValue, theoreticalMax, penaltyBreakdown, workers = EMPTY_WORKERS }) => {
     // Modal state for shift details
     const [selectedShift, setSelectedShift] = useState(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -521,48 +524,69 @@ const ScheduleTab = ({ assignments = [], objectiveValue, theoreticalMax, penalty
         [assignments, penaltyBreakdown, workers]
     );
 
-    // Group assignments by day of week, then by shift
-    const assignmentsByDay = {};
+    // Group assignments in two passes:
+    // 1) identity grouping by shift_id (or day+name+time fallback when legacy data lacks shift_id)
+    // 2) per-day display-name disambiguation for duplicate names only
+    const { assignmentsByDay, totalAssignments, uniqueShifts, uniqueWorkers } = useMemo(() => {
+        const byDay = {};
+        const shiftKeys = new Set();
 
-    // Initialize all days
-    DAYS_OF_WEEK.forEach((day) => {
-        assignmentsByDay[day] = {};
-    });
+        DAYS_OF_WEEK.forEach((day) => {
+            byDay[day] = {};
+        });
+        byDay.Unknown = {};
 
-    // Process each assignment
-    mergedAssignments.forEach((assign) => {
-        // Extract day using robust parsing
-        const timeStr = assign.time || '';
-        const dayName = extractDayName(timeStr, assign.day);
+        mergedAssignments.forEach((assign) => {
+            const timeStr = assign.time || '';
+            const dayName = extractDayName(timeStr, assign.day);
+            const timeRange = extractTimeRange(timeStr);
+            const baseName = assign.shift_name || 'Unknown Shift';
 
-        // Ensure day exists in our map (handle 'Unknown' gracefully)
-        if (!assignmentsByDay[dayName]) {
-            if (!assignmentsByDay.Unknown) {
-                assignmentsByDay.Unknown = {};
+            const targetDay = byDay[dayName] ? dayName : 'Unknown';
+            const fallbackKey = `${targetDay}::${baseName}::${timeRange}`;
+            const shiftKey = assign.shift_id || fallbackKey;
+            if (!byDay[targetDay][shiftKey]) {
+                byDay[targetDay][shiftKey] = {
+                    shiftKey,
+                    shiftId: assign.shift_id || null,
+                    baseName,
+                    displayName: baseName,
+                    timeRange,
+                    assignments: [],
+                };
             }
-        }
 
-        const targetDay = assignmentsByDay[dayName] ? dayName : 'Unknown';
+            const enrichedAssign = {
+                ...assign,
+                parsedTimeRange: timeRange,
+            };
 
-        // Group by shift name
-        const shiftName = assign.shift_name || 'Unknown Shift';
-        if (!assignmentsByDay[targetDay][shiftName]) {
-            assignmentsByDay[targetDay][shiftName] = [];
-        }
+            byDay[targetDay][shiftKey].assignments.push(enrichedAssign);
+            shiftKeys.add(shiftKey);
+        });
 
-        // Add parsed time range for display
-        const enrichedAssign = {
-            ...assign,
-            parsedTimeRange: extractTimeRange(timeStr),
+        Object.keys(byDay).forEach((day) => {
+            const groups = Object.values(byDay[day]);
+            const nameCounts = {};
+
+            groups.forEach((group) => {
+                nameCounts[group.baseName] = (nameCounts[group.baseName] || 0) + 1;
+            });
+
+            groups.forEach((group) => {
+                group.displayName = nameCounts[group.baseName] > 1 && group.timeRange
+                    ? `${group.baseName} (${group.timeRange})`
+                    : group.baseName;
+            });
+        });
+
+        return {
+            assignmentsByDay: byDay,
+            totalAssignments: mergedAssignments.length,
+            uniqueShifts: shiftKeys.size,
+            uniqueWorkers: new Set(mergedAssignments.map((item) => item.worker_name)).size,
         };
-
-        assignmentsByDay[targetDay][shiftName].push(enrichedAssign);
-    });
-
-    // Calculate stats
-    const totalAssignments = mergedAssignments.length;
-    const uniqueShifts = new Set(mergedAssignments.map((item) => item.shift_name)).size;
-    const uniqueWorkers = new Set(mergedAssignments.map((item) => item.worker_name)).size;
+    }, [mergedAssignments]);
 
     // Calculate efficiency percentage
     const efficiency = (theoreticalMax && objectiveValue !== undefined)
@@ -677,4 +701,3 @@ const ScheduleTab = ({ assignments = [], objectiveValue, theoreticalMax, penalty
 };
 
 export default ScheduleTab;
-

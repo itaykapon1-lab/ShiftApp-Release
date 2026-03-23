@@ -4,6 +4,7 @@ Constraints Configuration Route Handlers.
 Extracted from the monolithic api/routes.py.
 All logic, variables, and comments are preserved exactly as they were.
 """
+import logging
 from typing import List, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
@@ -14,6 +15,8 @@ from app.db.session import get_db
 from data.models import WorkerModel, SessionConfigModel
 from solver.constraints.definitions import constraint_definitions, ConstraintConfigBase, ConstraintKind
 from api.deps import get_session_id
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["constraints"])
 
@@ -243,4 +246,5 @@ async def update_constraints(
         raise
     except Exception as e:
         db.rollback()
-        raise HTTPException(500, detail=f"Failed to update constraints: {str(e)}")
+        logger.error("Failed to update constraints: %s", e, exc_info=True)
+        raise HTTPException(500, detail="Failed to update constraints. Please try again or contact support.")

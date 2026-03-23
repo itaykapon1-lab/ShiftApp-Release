@@ -98,43 +98,55 @@ class MaxHoursPerWeekConstraint(BaseConstraint):
         self._slack_vars.clear()
 
         for worker in context.workers:
-            # 1. Build the expression for total hours assigned to this worker
+            # Build a linear expression: total_hours = Sum(duration_i * X_i)
+            # where X_i is the binary assignment variable for shift i and
+            # duration_i is the length of that shift in hours.
             total_hours_expr = 0
             has_assignments = False
 
-            # We iterate through all potential assignments for this worker
-            # Context provides this pre-grouped by shift for efficiency.
+            # Use the global assignment index: worker_id -> [(Shift, X_var), ...]
+            # This is pre-grouped by worker, avoiding a full x_vars scan.
             assignments = []
-            # Note: We need to flatten the list of lists from worker_shift_assignments
-            # or iterate over worker_global_assignments. Global is cleaner here.
             if worker.worker_id in context.worker_global_assignments:
                 assignments = context.worker_global_assignments[worker.worker_id]
 
             for shift, x_var in assignments:
                 duration_hours = shift.time_window.duration_hours
+                # duration * X_var: contributes hours only if worker is assigned.
                 total_hours_expr += duration_hours * x_var
                 has_assignments = True
 
             if not has_assignments:
-                continue
+                continue  # Worker has no possible assignments; skip.
 
             if self.type == ConstraintType.HARD:
-                # HARD: strictly forbid exceeding max_hours — no slack variable
+                # HARD mode: total hours must not exceed the limit.
+                # Formula: Sum(duration_i * X_i) <= max_hours
+                # In English: "This worker cannot work more than max_hours total."
                 context.solver.Add(total_hours_expr <= self.max_hours)
             else:
-                # SOFT: existing slack-variable penalty (unchanged)
+                # SOFT mode: allow exceeding the limit, but penalize each
+                # excess hour in the objective function using a slack variable.
+                #
+                # The slack variable S captures how many hours OVER the limit
+                # the worker is assigned. S >= 0, unbounded above.
                 slack_name = f"slack_hours_{worker.worker_id}"
                 slack_var = context.solver.NumVar(
                     0.0, context.solver.infinity(), slack_name
                 )
 
-                # Store for later reporting
+                # Store for violation reporting after solve completes.
                 self._slack_vars[worker.worker_id] = slack_var
 
-                # Add the Constraint: Total - Slack <= Max
+                # Formula: total_hours - max_hours <= S (slack absorbs excess)
+                # Equivalently: S >= total_hours - max_hours (and S >= 0).
+                # In English: "The slack variable captures any hours above the
+                # limit. If the worker works 45h with a 40h limit, S >= 5."
                 context.solver.Add(total_hours_expr - self.max_hours <= slack_var)
 
-                # Update Objective: Apply penalty
+                # Objective penalty: S * penalty_per_hour (penalty is negative).
+                # The solver will minimize S (to maximize the objective) but may
+                # accept some excess if other assignments are valuable enough.
                 context.solver.Objective().SetCoefficient(
                     slack_var, self.penalty_per_hour
                 )
@@ -214,57 +226,70 @@ class AvoidConsecutiveShiftsConstraint(BaseConstraint):
         self._violation_markers.clear()
 
         for w_id, assignment_list in context.worker_global_assignments.items():
-            # Build a shift-level timeline (dedupe multi-role vars within same shift).
-            # Key: shift_id -> Shift object.
+            # Deduplicate shifts: a worker may have multiple X variables in the
+            # same shift (eligible for multiple roles), but we only care about
+            # shift-level timing for the rest-period check.
             shift_by_id = {}
             for shift, _ in assignment_list:
                 shift_by_id.setdefault(shift.shift_id, shift)
 
+            # Sort chronologically to check consecutive pairs.
             ordered_shifts = sorted(
                 shift_by_id.values(),
                 key=lambda s: s.time_window.start
             )
 
             if len(ordered_shifts) < 2:
-                continue
+                continue  # Need at least 2 shifts to form a consecutive pair.
 
             for i in range(len(ordered_shifts) - 1):
                 shift_a = ordered_shifts[i]
                 shift_b = ordered_shifts[i + 1]
 
-                # Calculate rest time
+                # Calculate the gap between end of Shift A and start of Shift B.
                 delta = shift_b.time_window.start - shift_a.time_window.end
                 rest_hours = delta.total_seconds() / 3600.0
 
-                # Check if this pair violates the rule
+                # Only constrain pairs where the rest gap is insufficient.
                 if 0 <= rest_hours < self.min_rest_hours:
+                    # Aggregate assignment vars for each shift (sum of X vars).
+                    # is_working_A >= 1 means the worker IS assigned to Shift A.
                     vars_a = context.worker_shift_assignments.get((w_id, shift_a.shift_id), [])
                     vars_b = context.worker_shift_assignments.get((w_id, shift_b.shift_id), [])
                     is_working_a = sum(vars_a)
                     is_working_b = sum(vars_b)
 
                     if self.type == ConstraintType.HARD:
-                        # HARD: forbid being assigned in both violating shifts.
+                        # Formula: is_working_A + is_working_B <= 1
+                        # In English: "If these two shifts have insufficient rest
+                        # between them, the worker can be in at most one of them."
                         context.solver.Add(is_working_a + is_working_b <= 1)
                     else:
-                        # SOFT: existing indicator-variable penalty (unchanged)
+                        # SOFT mode: use a boolean indicator variable (V) that is
+                        # forced to 1 when BOTH shifts are assigned.
                         violation_name = (
                             f"consecutive_viol_{w_id}_"
                             f"{shift_a.shift_id}_{shift_b.shift_id}"
                         )
                         violation_var = context.solver.BoolVar(violation_name)
 
-                        # violation_var >= var_a + var_b - 1
+                        # Formula: V >= is_working_A + is_working_B - 1
+                        # If both are 1: V >= 1 (violation detected).
+                        # If at most one is 1: V >= 0 (no violation forced).
+                        # In English: "V must be 1 whenever this worker is
+                        # assigned to both back-to-back shifts."
                         context.solver.Add(
                             violation_var >= is_working_a + is_working_b - 1
                         )
 
-                        # Update Objective
+                        # Penalize: V * penalty (negative) in the objective.
+                        # The solver may still assign both shifts if the
+                        # combined preference scores outweigh the penalty.
                         context.solver.Objective().SetCoefficient(
                             violation_var, self.penalty
                         )
 
-                        # Save context for reporting
+                        # Store for post-solve violation reporting.
                         self._violation_markers.append((
                             w_id,
                             shift_a.shift_id,
@@ -330,13 +355,15 @@ class WorkerPreferencesConstraint(BaseConstraint):
     def apply(self, context: SolverContext) -> None:
         """Applies preference scores to the assignment variables."""
 
-        # 1. Create optimization maps for O(1) lookup
+        # Build O(1) lookup maps to avoid scanning the full lists repeatedly.
         shift_map = {s.shift_id: s for s in context.shifts}
         worker_map = {w.worker_id: w for w in context.workers}
         updates_count = 0
         match_attempts = 0
-        
-        # 2. Iterate over all assignment variables (X)
+
+        # Iterate over every X variable (worker-to-role assignment).
+        # For each, ask the domain model whether the worker prefers or
+        # dislikes the shift's time window, then adjust the objective.
         for key, x_var in context.x_vars.items():
             w_id, s_id, t_id, role_sig = key
 
@@ -346,31 +373,43 @@ class WorkerPreferencesConstraint(BaseConstraint):
             if worker and shift:
                 match_attempts += 1
 
-                # 3. Fetch the raw directional signal from the Domain Model
+                # Query the domain model for a directional preference signal:
+                #   positive = worker prefers this time slot
+                #   negative = worker wants to avoid this time slot
+                #   zero     = neutral (no preference expressed)
                 raw_score = worker.calculate_preference_score(shift.time_window)
 
-                # 4. Map raw signal to configured reward/penalty values
+                # Map the continuous raw score to discrete reward/penalty.
+                # We only care about direction, not magnitude — the configured
+                # preference_reward / preference_penalty values set the weight.
                 if raw_score > 0:
-                    score = self.preference_reward
+                    score = self.preference_reward     # e.g., +10
                 elif raw_score < 0:
-                    score = self.preference_penalty
+                    score = self.preference_penalty    # e.g., -100
                 else:
                     score = 0
 
-                # 5. Update the Objective Function
+                # Add the preference score to this X variable's existing
+                # objective coefficient (which may already include option
+                # preference from Y-var linkage). Additive composition.
                 if score != 0:
                     current_coeff = context.solver.Objective().GetCoefficient(x_var)
                     new_coeff = score + current_coeff
+                    # Formula: Objective += score * X_var (if assigned = 1)
+                    # In English: "Reward the solver for assigning preferred
+                    # shifts, penalize it for assigning unwanted ones."
                     context.solver.Objective().SetCoefficient(x_var, new_coeff)
                     verified_coeff = context.solver.Objective().GetCoefficient(x_var)
 
                     if verified_coeff != new_coeff:
-                        logger.error(
-                            f"CRITICAL: Failed to update variable {x_var.name()}. Expected {new_coeff}, got {verified_coeff}")
+                        logger.warning(
+                            "Failed to update variable %s. Expected %s, got %s",
+                            x_var.name(), new_coeff, verified_coeff,
+                        )
                     else:
                         updates_count += 1
                         logger.debug(f"Updated {x_var.name()} -> Coeff: {verified_coeff} (Score: {score})")
-        
+
         logger.info(f"WorkerPreferencesConstraint: {match_attempts} checked, {updates_count} updated")
 
     def get_violations(self, context: SolverContext) -> List[ConstraintViolation]:
@@ -449,17 +488,26 @@ class TaskOptionPriorityConstraint(BaseConstraint):
         for shift in context.shifts:
             for task in shift.tasks:
                 for opt_idx, option in enumerate(task.options):
+                    # Priority #1 = best (no penalty). Higher = worse.
                     priority = getattr(option, 'priority', 1)
                     if priority <= 1:
-                        continue  # no penalty for #1
+                        continue  # No penalty for the preferred option.
 
+                    # Look up the Y variable for this option.
                     y_key = (shift.shift_id, task.task_id, opt_idx)
                     y_var = context.y_vars.get(y_key)
                     if y_var is None:
                         continue
 
+                    # Penalty scales linearly with priority distance from #1.
+                    # e.g., base=-20, priority=3 -> penalty = -20 * (3-1) = -40
                     penalty = self.base_penalty * (priority - 1)
+                    # Additive composition with any existing preference_score
+                    # coefficient already set on this Y variable by the engine.
                     current = context.solver.Objective().GetCoefficient(y_var)
+                    # Formula: Objective += penalty * Y_var (if option selected = 1)
+                    # In English: "Penalize selecting lower-priority options so
+                    # the solver prefers #1 unless forced by other constraints."
                     context.solver.Objective().SetCoefficient(y_var, current + penalty)
 
                     self._penalized_options.append(

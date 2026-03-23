@@ -41,12 +41,10 @@ class DatabaseService:
             connection_string (str): Ignored - uses app.db.session.engine.
                 Parameter kept for backward compatibility.
         """
+        # Reuse the singleton engine and session factory from app.db.session
+        # rather than creating new ones — ensures consistent connection pooling
         self._engine = engine
         self._session_factory = SessionLocal
-
-    def create_tables(self) -> None:
-        """Creates the database schema based on imported models."""
-        Base.metadata.create_all(bind=self._engine)
 
     def get_session(self) -> Session:
         """Creates and returns a raw new database session.
@@ -73,9 +71,12 @@ class DatabaseService:
         session: Session = self._session_factory()
         try:
             yield session
+            # If the caller's code completes without exception, persist all changes
             session.commit()
         except Exception:
+            # On ANY exception, undo all uncommitted changes to leave DB clean
             session.rollback()
             raise
         finally:
+            # Always return the connection to the pool, even after rollback
             session.close()

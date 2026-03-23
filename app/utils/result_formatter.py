@@ -39,8 +39,9 @@ def format_solver_results(result: Dict[str, Any]) -> None:
         raw_time = assign.get('time', 'N/A')
         time_range = raw_time[11:16] if len(raw_time) > 16 else raw_time
         shift_name = assign.get('shift_name', 'Unknown')
+        shift_id = assign.get('shift_id', '')
 
-        shift_key = (day, time_range, shift_name)
+        shift_key = (day, time_range, shift_name, shift_id)
 
         if shift_key not in shifts_map:
             shifts_map[shift_key] = {

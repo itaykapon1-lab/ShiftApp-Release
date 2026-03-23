@@ -10,7 +10,7 @@ connection arguments and pooling settings.
 """
 
 import logging
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.engine import Engine
 from sqlalchemy.pool import StaticPool, QueuePool
@@ -59,6 +59,15 @@ def create_db_engine() -> Engine:
         engine_kwargs["max_overflow"] = settings.db_max_overflow
         engine_kwargs["pool_pre_ping"] = settings.db_pool_pre_ping
         engine_kwargs["poolclass"] = QueuePool
+        engine_kwargs["pool_timeout"] = settings.db_pool_timeout
+        engine_kwargs["pool_recycle"] = settings.db_pool_recycle
+        # Protect Gunicorn workers against DB stalls:
+        # - connect_timeout: abort if TCP handshake takes >10s
+        # - statement_timeout: kill any query running longer than 30s
+        engine_kwargs["connect_args"] = {
+            "connect_timeout": 10,
+            "options": "-c statement_timeout=30000",
+        }
         logger.info(f"Using PostgreSQL with pool_size={settings.db_pool_size}, max_overflow={settings.db_max_overflow}")
 
     else:
@@ -71,18 +80,23 @@ def create_db_engine() -> Engine:
 # Create the database engine
 engine: Engine = create_db_engine()
 
+
+def _set_sqlite_pragma(dbapi_conn, connection_record):
+    """Enable FK enforcement on every SQLite connection."""
+    cursor = dbapi_conn.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
+if settings.is_sqlite:
+    event.listen(engine, "connect", _set_sqlite_pragma)
+
 # Session factory - creates new Session objects
 SessionLocal = sessionmaker(
     autocommit=False,
     autoflush=False,
     bind=engine
 )
-
-
-def init_db() -> None:
-    """Initialize database schema by creating all tables."""
-    Base.metadata.create_all(bind=engine)
-    logger.info("Database tables initialized")
 
 
 def get_db() -> Session:

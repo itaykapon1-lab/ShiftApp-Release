@@ -47,11 +47,14 @@ class ConstraintMapper:
         Returns:
             str: MD5 hash signature
         """
-        # Build signature data from category and params only
+        # Build signature data from the immutable identity of the constraint.
+        # "id" and "enabled" are excluded because they are mutable metadata,
+        # not part of the constraint's semantic identity.
         sig_data = {
             "category": constraint.get("category"),
             "params": constraint.get("params", {})
         }
+        # sort_keys=True ensures deterministic JSON regardless of dict order.
         return hashlib.md5(json.dumps(sig_data, sort_keys=True).encode()).hexdigest()
 
     def _normalize_dynamic_constraint_params(self, constraint: dict) -> dict:
@@ -62,12 +65,17 @@ class ConstraintMapper:
         normalized = dict(constraint)
         category = normalized.get("category")
 
+        # Only dynamic (per-worker-pair) constraints need normalisation.
+        # Static constraints (max_hours, etc.) already use canonical layout.
         if category not in ("mutual_exclusion", "colocation"):
             return normalized
 
         params = dict(normalized.get("params") or {})
 
-        # Migrate legacy/root-level fields into canonical params payload.
+        # Migrate legacy/root-level fields into the canonical "params" dict.
+        # Older constraint JSON stored worker_a_id, worker_b_id, penalty at
+        # the top level rather than nested under "params".  This migration
+        # ensures the signature and Pydantic validation see a uniform shape.
         if "worker_a_id" in normalized and "worker_a_id" not in params:
             params["worker_a_id"] = normalized.get("worker_a_id")
         if "worker_b_id" in normalized and "worker_b_id" not in params:
@@ -79,7 +87,8 @@ class ConstraintMapper:
 
         normalized["params"] = params
 
-        # Remove duplicated legacy root fields after migration.
+        # Clean up: remove the legacy root-level duplicates now that they've
+        # been migrated into "params".
         normalized.pop("worker_a_id", None)
         normalized.pop("worker_b_id", None)
         normalized.pop("penalty", None)
@@ -144,52 +153,61 @@ class ConstraintMapper:
         """
         errors: List[str] = []
         try:
-            # 1. Get raw constraints from parser
+            # --- Phase 1: Collect raw constraints from the parser ---
+            # ExcelParser stores constraint rows as raw dicts in _raw_constraints.
+            # Each dict has: {Type, Subject, Target, Value, Strictness, Penalty}.
             raw_constraints = getattr(parser, '_raw_constraints', [])
 
-            # 2. Load existing constraints for this session
+            # --- Phase 2: Load existing constraints for this session ---
+            # Non-destructive merge: new constraints are appended to (not replacing)
+            # the existing constraint list in SessionConfig.
             config = self.db.query(SessionConfigModel).filter_by(session_id=self.session_id).first()
             existing_constraints = []
             if config and config.constraints:
                 existing_constraints = config.constraints if isinstance(config.constraints, list) else []
 
-            # Normalize any legacy dynamic constraints before dedup/signature checks.
+            # Normalize any legacy dynamic constraints (worker_a_id at root level)
+            # so that signature comparison works correctly.
             existing_constraints = [
                 self._normalize_dynamic_constraint_params(c) for c in existing_constraints
             ]
 
-            # Build signature set for existing constraints
+            # Build a set of signatures for existing constraints to detect duplicates.
+            # A duplicate = same category + same params (regardless of id/enabled).
             existing_signatures = {
                 self._compute_constraint_signature(c) for c in existing_constraints
             }
 
-            # Determine next available ID
+            # Auto-increment IDs: find the highest existing ID and start from +1.
             next_id = max((c.get("id", 0) for c in existing_constraints), default=0) + 1
 
-            # Track how many new constraints we add
-            new_count = 0
+            new_count = 0  # Counter for logging
 
-            # 3. Transform and merge new constraints
+            # --- Phase 3: Transform each raw constraint into canonical schema ---
             for raw in raw_constraints:
-                # Extract raw values safely
-                raw_type = str(raw.get('Type', '')).strip()
-                subject = str(raw.get('Subject', '')).strip()
-                target = str(raw.get('Target', '')).strip()
+                # Extract the Excel cell values, trimming whitespace.
+                raw_type = str(raw.get('Type', '')).strip()     # e.g., "Mutual Exclusion"
+                subject = str(raw.get('Subject', '')).strip()   # e.g., worker_id or reward weight
+                target = str(raw.get('Target', '')).strip()     # e.g., worker_id or shift_id
 
-                # Normalize Strictness (Excel 'Hard' -> API 'HARD')
+                # Normalize Strictness: Excel may have "Hard", "hard", "HARD".
+                # If unrecognised or missing, default to "HARD" (safer default).
                 raw_strictness = str(raw.get('Strictness', '')).strip().upper()
                 strictness_specified = raw_strictness in ['HARD', 'SOFT']
                 strictness = raw_strictness if strictness_specified else 'HARD'
 
-                # Default penalty for SOFT constraints
+                # SOFT constraints apply a penalty to the objective function;
+                # HARD constraints must not be violated at all (penalty=0 → not used).
                 penalty = -100.0 if strictness == 'SOFT' else 0.0
 
                 transformed_constraint = None
 
-                # Normalize type for case-insensitive matching
+                # Case-insensitive type matching — the same constraint type has
+                # multiple accepted spellings (e.g., "co-location", "colocation", "pair").
                 raw_type_lower = raw_type.lower()
 
-                # --- TRANSFORM: Mutual Exclusion ---
+                # --- TRANSFORM: Mutual Exclusion (Ban) ---
+                # "Worker A and Worker B must NOT be scheduled on the same shift."
                 if raw_type_lower in ('mutual exclusion', 'mutualexclusion', 'mutual_exclusion', 'ban'):
                     if subject and target:
                         transformed_constraint = {
@@ -206,7 +224,8 @@ class ConstraintMapper:
                             },
                         }
 
-                # --- TRANSFORM: Co-Location ---
+                # --- TRANSFORM: Co-Location (Pair) ---
+                # "Worker A and Worker B MUST be scheduled on the same shift."
                 elif raw_type_lower in ('co-location', 'colocation', 'co_location', 'pair'):
                     if subject and target:
                         transformed_constraint = {
@@ -223,10 +242,11 @@ class ConstraintMapper:
                             },
                         }
 
-                # --- TRANSFORM: Preference (worker prefers/avoids a shift) ---
+                # --- TRANSFORM: Preference ---
+                # "Worker prefers or avoids a specific shift."
+                # Value="Prefer" → +10 bonus to objective; Value="Avoid" → -10 penalty.
                 elif raw_type_lower in ('preference', 'prefer', 'prefers'):
                     if subject and target:
-                        # Value column may contain "Prefer" or "Avoid"
                         value = str(raw.get('Value', 'Prefer')).strip().lower()
                         pref_score = 10.0 if value == 'prefer' else -10.0
 
@@ -243,14 +263,17 @@ class ConstraintMapper:
                             },
                         }
 
-                # --- TRANSFORM: Max Hours ---
+                # --- TRANSFORM: Max Hours Per Week ---
+                # Caps the total hours a worker can be assigned in a week.
+                # Value column specifies the limit (default 40).
                 elif raw_type_lower in ('max hours', 'maxhours', 'max_hours', 'max hours per week'):
                     try:
                         limit = int(raw.get('Value', 40))
                     except (ValueError, TypeError):
-                        limit = 40
+                        limit = 40  # Industry-standard 40-hour work week fallback
 
-                    # Static constraints default to SOFT for backward compat
+                    # Static constraints default to SOFT for backward compat —
+                    # older Excel files didn't specify strictness.
                     effective_strictness = strictness if strictness_specified else 'SOFT'
                     transformed_constraint = {
                         "id": next_id,
@@ -264,7 +287,8 @@ class ConstraintMapper:
                         "enabled": True,
                     }
 
-                # --- TRANSFORM: Min Hours ---
+                # --- TRANSFORM: Min Hours Per Week ---
+                # Ensures a worker is assigned at least this many hours.
                 elif raw_type_lower in ('min hours', 'minhours', 'min_hours', 'min hours per week'):
                     try:
                         limit = int(raw.get('Value', 0))
@@ -283,14 +307,16 @@ class ConstraintMapper:
                     }
 
                 # --- TRANSFORM: Avoid Consecutive Shifts ---
+                # Prevents back-to-back shifts without adequate rest.
+                # Value = minimum rest hours between shifts (default 12).
                 elif raw_type_lower in ('avoid consecutive shifts', 'avoid_consecutive_shifts'):
                     try:
                         min_rest = int(float(raw.get('Value', 12)))
                     except (ValueError, TypeError):
-                        min_rest = 12
+                        min_rest = 12  # 12-hour minimum rest period default
                     try:
                         pen = float(raw.get('Penalty', -30.0))
-                        if pen != pen:  # NaN guard
+                        if pen != pen:  # NaN guard: float('nan') != float('nan') is True
                             pen = -30.0
                     except (ValueError, TypeError):
                         pen = -30.0
@@ -309,12 +335,17 @@ class ConstraintMapper:
                         },
                     }
 
-                # --- TRANSFORM: Worker Preferences ---
+                # --- TRANSFORM: Worker Preferences (Global Toggle) ---
+                # This is a global setting that enables/disables the worker
+                # preference system.  When enabled, the solver respects the
+                # * (prefer) and ! (avoid) markers from the Workers sheet.
                 elif raw_type_lower in ('worker preferences', 'worker_preferences'):
+                    # Value="True"/"False" controls the on/off toggle.
                     value_raw = str(raw.get('Value', 'True')).strip().lower()
                     enabled_flag = value_raw not in ('false', '0', 'no', '')
 
                     # Parse configurable weights from legacy Excel columns.
+                    # Subject column → preference_reward (bonus for preferred shifts).
                     preference_reward, reward_warning = self._parse_int_cell(
                         raw.get('Subject'),
                         field_name="Worker Preferences reward (Subject column)",
@@ -324,11 +355,12 @@ class ConstraintMapper:
                     if reward_warning:
                         errors.append(reward_warning)
 
+                    # Penalty column → preference_penalty (penalty for avoided shifts).
                     preference_penalty, penalty_warning = self._parse_int_cell(
                         raw.get('Penalty'),
                         field_name="Worker Preferences penalty (Penalty column)",
                         default=-100,
-                        max_value=-1,
+                        max_value=-1,  # Must be negative (it's a penalty)
                     )
                     if penalty_warning:
                         errors.append(penalty_warning)
@@ -358,12 +390,14 @@ class ConstraintMapper:
                     }
 
                 # --- TRANSFORM: Task Option Priority ---
+                # Controls the penalty applied when the solver picks a lower-priority
+                # task option (e.g., fallback staffing config) over the preferred one.
                 elif raw_type_lower in (
                     'task option priority', 'task_option_priority', 'option priority',
                 ):
                     try:
                         pen = float(raw.get('Penalty', -20.0))
-                        if pen != pen:  # NaN guard
+                        if pen != pen:  # NaN guard: float('nan') != float('nan')
                             pen = -20.0
                     except (ValueError, TypeError):
                         pen = -20.0
@@ -396,12 +430,17 @@ class ConstraintMapper:
                     else:
                         logger.debug(f"Skipped duplicate constraint: {transformed_constraint.get('category')}")
 
-            # 4. Use defaults only if no constraints exist at all
+            # --- Phase 4: Apply defaults if no constraints exist at all ---
+            # On first import (no prior constraints in DB and no constraints in
+            # the Excel file), seed with sensible defaults from the constraint
+            # registry so the solver has basic rules to work with.
             if not existing_constraints:
                 logger.debug("No constraints found, loading defaults")
                 existing_constraints = self._get_default_constraints()
 
-            # 5. Save merged list to Database
+            # --- Phase 5: Persist the merged constraint list to the DB ---
+            # Upsert pattern: update the existing SessionConfig row if it exists,
+            # otherwise create a new one.  This avoids duplicate config rows.
             if config:
                 config.constraints = existing_constraints
             else:
@@ -425,19 +464,25 @@ class ConstraintMapper:
         registry, preventing drift (for example, dropping worker_preferences
         or task_option_priority from imported sessions).
         """
+        # Ensure constraint definitions are registered (needed in subprocess contexts).
         try:
             register_core_constraints()
         except ValueError:
-            # Definitions already registered in this process.
+            # Already registered in this process — safe to proceed.
             pass
 
         defaults: list[dict] = []
         next_id = 1
 
+        # Iterate all registered constraint definitions and pick only STATIC ones.
+        # Dynamic constraints (mutual_exclusion, colocation) are per-worker-pair
+        # and cannot have meaningful defaults — they require user input.
         for defn in constraint_definitions.all():
             if defn.constraint_kind != ConstraintKind.STATIC:
                 continue
 
+            # Extract default parameter values from the Pydantic model's JSON schema.
+            # This keeps defaults in sync with the canonical schema definition.
             default_params = {}
             schema_props = defn.config_model.model_json_schema().get("properties", {})
             for field_name, field_info in schema_props.items():

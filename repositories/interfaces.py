@@ -12,9 +12,9 @@ Key Concepts:
 """
 
 from typing import List, Optional, Protocol, Dict, Set
-from domain.worker_model import Worker
-from domain.shift_model import Shift
-from domain.time_utils import TimeWindow
+from domain.worker_model import Worker     # Pure domain dataclass representing an employee
+from domain.shift_model import Shift       # Pure domain dataclass representing a work shift
+from domain.time_utils import TimeWindow   # (start, end) datetime pair — canonical temporal primitive
 
 
 class IWorkerRepository(Protocol):
@@ -151,6 +151,8 @@ class IDataManager(Protocol):
     """
 
     # --- Read Methods (Used by Solver) ---
+    # These methods are called by the solver engine to build the availability
+    # matrix and determine which workers can be assigned to which shifts.
 
     def get_eligible_workers(self,
                              time_window: TimeWindow,
@@ -172,6 +174,9 @@ class IDataManager(Protocol):
         ...
 
     # --- Write/Update Methods (Used by UI/Service) ---
+    # These methods are called by the API/service layer for CRUD operations
+    # triggered by the frontend or Excel import pipeline.
+
     def get_worker(self, worker_id: str) -> Optional[Worker]:
         """Retrieves a specific worker by their unique ID. O(1) lookup."""
         ...

@@ -86,6 +86,30 @@ const renderAvailabilityWithPreferences = (worker) => {
 };
 
 /**
+ * Derives a short suffix from a worker_id for duplicate-name disambiguation.
+ * Uses the last 4 characters of the ID (after the last hyphen, if present).
+ */
+const shortIdSuffix = (workerId) => {
+    if (!workerId) return '';
+    const parts = workerId.split('-');
+    const last = parts[parts.length - 1];
+    return last.slice(-4);
+};
+
+/**
+ * Builds a Set of worker names that appear more than once in the list.
+ */
+const buildDuplicateNameSet = (workers) => {
+    const counts = {};
+    workers.forEach(w => { counts[w.name] = (counts[w.name] || 0) + 1; });
+    const dupes = new Set();
+    Object.entries(counts).forEach(([name, count]) => {
+        if (count > 1) dupes.add(name);
+    });
+    return dupes;
+};
+
+/**
  * WorkersTab Component
  * @param {Object} props
  * @param {Array} props.workers - List of workers
@@ -97,6 +121,9 @@ const renderAvailabilityWithPreferences = (worker) => {
 const WorkersTab = ({ workers, onAddWorker, onEditWorker, onDeleteWorker, showToast }) => {
     const [deleteConfirm, setDeleteConfirm] = useState({ open: false, worker: null });
     const [isDeleting, setIsDeleting] = useState(false);
+
+    // Detect which names appear more than once for visual disambiguation
+    const duplicateNames = buildDuplicateNameSet(workers);
 
     const handleDeleteClick = (worker) => {
         setDeleteConfirm({ open: true, worker });
@@ -169,6 +196,14 @@ const WorkersTab = ({ workers, onAddWorker, onEditWorker, onDeleteWorker, showTo
                                         {/* REMOVED: ID column */}
                                         <td className="py-5 px-6 font-black text-lg text-gray-900">
                                             {w.name || 'Unnamed'}
+                                            {duplicateNames.has(w.name) && (
+                                                <span
+                                                    className="ml-2 px-1.5 py-0.5 text-xs font-mono font-medium text-gray-400 bg-gray-100 border border-gray-200 rounded select-none"
+                                                    title={`Worker ID: ${w.worker_id}`}
+                                                >
+                                                    #{shortIdSuffix(w.worker_id)}
+                                                </span>
+                                            )}
                                         </td>
                                         <td className="py-5 px-6">
                                             <div className="flex gap-2 flex-wrap">

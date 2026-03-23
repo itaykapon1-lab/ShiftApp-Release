@@ -14,8 +14,17 @@ const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'F
  * Each column contains the shifts scheduled for that day.
  *
  * Props:
- * - assignmentsByDay: Object - assignments grouped by day
- *   { 'Monday': { 'ShiftName': [...assignments] }, ... }
+ * - assignmentsByDay: Object - pre-grouped shift cards by day
+ *   {
+ *     'Monday': {
+ *       '<shiftKey>': {
+ *         shiftKey,
+ *         displayName,
+ *         timeRange,
+ *         assignments: [...]
+ *       }
+ *     }
+ *   }
  * - onShiftClick: Function - callback when a shift card is clicked
  */
 const WeekGrid = ({ assignmentsByDay, onShiftClick }) => {
@@ -23,8 +32,8 @@ const WeekGrid = ({ assignmentsByDay, onShiftClick }) => {
         <div className="grid grid-cols-7 gap-3 min-h-[500px]">
             {DAYS_OF_WEEK.map((day) => {
                 const shiftsForDay = assignmentsByDay[day] || {};
-                const shiftNames = Object.keys(shiftsForDay);
-                const hasShifts = shiftNames.length > 0;
+                const shiftGroups = Object.values(shiftsForDay);
+                const hasShifts = shiftGroups.length > 0;
 
                 return (
                     <div key={day} className="flex flex-col">
@@ -44,22 +53,15 @@ const WeekGrid = ({ assignmentsByDay, onShiftClick }) => {
                                 : 'bg-gray-50 border-2 border-dashed border-gray-200'
                         }`}>
                             {hasShifts ? (
-                                shiftNames.map((shiftName) => {
-                                    const shiftAssignments = shiftsForDay[shiftName];
-                                    // Use the pre-parsed time range from ScheduleTab
-                                    const firstAssign = shiftAssignments[0];
-                                    const timeRange = firstAssign?.parsedTimeRange || firstAssign?.time || '';
-
-                                    return (
-                                        <ShiftCard
-                                            key={shiftName}
-                                            shiftName={shiftName}
-                                            timeRange={timeRange}
-                                            assignments={shiftAssignments}
-                                            onClick={onShiftClick}
-                                        />
-                                    );
-                                })
+                                shiftGroups.map((group) => (
+                                    <ShiftCard
+                                        key={group.shiftKey}
+                                        shiftName={group.displayName}
+                                        timeRange={group.timeRange}
+                                        assignments={group.assignments}
+                                        onClick={onShiftClick}
+                                    />
+                                ))
                             ) : (
                                 <div className="flex items-center justify-center h-full text-gray-400 text-xs">
                                     No shifts

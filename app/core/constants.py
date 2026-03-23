@@ -1,6 +1,10 @@
 """Application-wide constants for solver and constraint defaults."""
 
 SOLVER_TIMEOUT_MS: int = 300_000
+MAX_SOLVER_VARIABLES: int = 50_000
+SOLVER_RANDOM_SEED: int = 42
+SOLVER_STALE_JOB_BUFFER_SECONDS: int = 60
+SOLVER_PROCESS_MEMORY_LIMIT_MB: int = 2_048
 EPSILON: float = 0.001
 
 MAX_HOURS_PER_WEEK_DEFAULT: int = 40

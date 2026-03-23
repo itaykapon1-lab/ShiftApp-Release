@@ -6,12 +6,27 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy.orm import sessionmaker
 
+from app.core.exception_handlers import register_exception_handlers
+from app.core.rate_limiter import limiter as global_limiter
 from app.db.session import get_db
 from api.routes import router as api_router
 from api.routes_constraints_schema import router as constraints_schema_router
 from repositories.sql_repo import SQLWorkerRepository, SQLShiftRepository
 from tests.fixtures.db_fixtures import create_isolated_engine, destroy_isolated_engine
 import data.models  # noqa: F401  — ensure all ORM models register on Base
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _disable_global_rate_limiter():
+    """Disable the global rate limiter for all tests.
+
+    Rate limiting tests create their own per-test Limiter instances and
+    are unaffected. This prevents the module-level singleton from leaking
+    rate-limit state across test boundaries (e.g. chaos tests hitting /solve).
+    """
+    global_limiter.enabled = False
+    yield
+    global_limiter.enabled = True
 
 
 @pytest.fixture(scope="function")
@@ -49,8 +64,12 @@ def session_id_factory():
 
 
 @pytest.fixture(scope="function")
-def test_session_id(session_id_factory):
-    return session_id_factory()
+def test_session_id(session_id_factory, db_session):
+    sid = session_id_factory()
+    from data.models import SessionConfigModel
+    db_session.add(SessionConfigModel(session_id=sid, constraints=[]))
+    db_session.flush()
+    return sid
 
 
 @pytest.fixture(scope="function")
@@ -58,6 +77,7 @@ def client(db_session):
     app = FastAPI()
     app.include_router(api_router)
     app.include_router(constraints_schema_router, prefix="/api/v1")
+    register_exception_handlers(app)
 
     def override_get_db():
         yield db_session

@@ -128,6 +128,7 @@ def _create_pending_job(iso_session_factory, session_id: str) -> str:
     db = iso_session_factory()
     try:
         job_id = SolverJobStore.create_job(db, session_id)
+        db.commit()  # create_job only flushes; persist before closing session
         return job_id
     finally:
         db.close()

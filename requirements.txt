@@ -6,6 +6,7 @@ pydantic-settings==2.12.0
 
 # Database
 sqlalchemy==2.0.45
+alembic>=1.15.0
 # SQLite is built-in, no extra driver needed
 
 # PostgreSQL driver (required for production on Render.com)
@@ -18,6 +19,10 @@ ortools==9.14.6206
 python-multipart==0.0.21
 openpyxl==3.1.5
 pandas==2.3.2
+
+# Rate limiting (redis enables cross-worker shared storage in production)
+slowapi>=0.1.9
+redis>=5.0
 
 # Production server (required for deployment)
 gunicorn>=21.0.0

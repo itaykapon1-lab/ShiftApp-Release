@@ -29,9 +29,19 @@ class Requirement:
     required_skills: Dict[str, int] = field(default_factory=dict)
 
     def __post_init__(self):
-        """Validates that at least 1 worker is required."""
+        """Validates count and normalizes skill keys to Title Case.
+
+        Skill names are normalized to match the convention used by
+        ``Worker.set_skill_level()`` (e.g., "cook" → "Cook"), ensuring
+        case-insensitive matching across all code paths (API, Excel, solver).
+        """
         if self.count < 1:
             raise ValueError(f"Requirement count must be >= 1, got {self.count}")
+        # Normalize skill keys to Title Case for case-insensitive matching
+        if self.required_skills:
+            self.required_skills = {
+                k.strip().title(): v for k, v in self.required_skills.items()
+            }
 
     def __repr__(self) -> str:
         """Returns a string representation of the requirement."""

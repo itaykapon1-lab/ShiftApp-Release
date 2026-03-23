@@ -12,10 +12,10 @@ They strictly adhere to the IWorkerRepository and IShiftRepository interfaces.
 import logging
 from typing import List, Dict, Optional
 
-# Interface Imports
+# Interface Imports — Protocol classes defining the CRUD contract
 from repositories.interfaces import IWorkerRepository, IShiftRepository
 
-# Domain Imports
+# Domain Imports — pure dataclasses with no I/O or ORM dependencies
 from domain.worker_model import Worker
 from domain.shift_model import Shift
 
@@ -40,8 +40,10 @@ class MemoryWorkerRepository(IWorkerRepository):
             initial_data (Optional[List[Worker]]): A list of workers to load
                 immediately upon initialization. Defaults to None.
         """
+        # In-memory hash map: worker_id → Worker domain object (O(1) lookup)
         self._storage: Dict[str, Worker] = {}
 
+        # Optionally seed the repository with pre-built worker objects
         if initial_data:
             for worker in initial_data:
                 self.add(worker)
@@ -75,6 +77,8 @@ class MemoryWorkerRepository(IWorkerRepository):
         Raises:
             ValueError: If a worker with the same ID already exists. Use update() to modify.
         """
+        # Enforce uniqueness: duplicate IDs are rejected (unlike SQL upsert behaviour).
+        # Callers must use update() explicitly to modify existing records.
         if worker.worker_id in self._storage:
             raise ValueError(
                 f"Worker '{worker.worker_id}' already exists. Use update() to modify."
@@ -122,15 +126,21 @@ class MemoryShiftRepository(IShiftRepository):
         _storage (Dict[str, Shift]): The internal hash map storing shifts by ID.
     """
 
-    def __init__(self, initial_data: Optional[List[Shift]] = None):
+    def __init__(self, initial_data: Optional[List[Shift]] = None, session_id: str = "memory-session"):
         """Initializes the repository with optional initial data.
 
         Args:
             initial_data (Optional[List[Shift]]): A list of shifts to load
                 immediately. Defaults to None.
+            session_id (str): Tenant identifier. Defaults to ``"memory-session"``
+                for test convenience; callers that need deterministic shift IDs
+                (e.g. Excel import) should pass a real session ID.
         """
+        # In-memory hash map: shift_id → Shift domain object (O(1) lookup)
         self._storage: Dict[str, Shift] = {}
+        self.session_id: str = session_id
 
+        # Optionally seed the repository with pre-built shift objects
         if initial_data:
             for shift in initial_data:
                 self.add(shift)
@@ -164,6 +174,7 @@ class MemoryShiftRepository(IShiftRepository):
         Raises:
             ValueError: If a shift with the same ID already exists. Use update() to modify.
         """
+        # Enforce uniqueness: duplicate IDs are rejected (unlike SQL upsert behaviour)
         if shift.shift_id in self._storage:
             raise ValueError(
                 f"Shift '{shift.shift_id}' already exists. Use update() to modify."

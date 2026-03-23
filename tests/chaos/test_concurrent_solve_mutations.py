@@ -43,6 +43,7 @@ import app.db.session as session_mod
 import services.solver_service as solver_mod
 from api.routes import router as api_router
 from api.routes_constraints_schema import router as constraints_schema_router
+from app.core.exception_handlers import register_exception_handlers
 from app.db.session import get_db
 from data.models import ShiftModel, SolverJobModel, WorkerModel
 from tests.fixtures.db_fixtures import create_isolated_engine, destroy_isolated_engine
@@ -159,6 +160,7 @@ def chaos_client(chaos_engine, chaos_session_factory, chaos_session_id):
     app = FastAPI()
     app.include_router(api_router)
     app.include_router(constraints_schema_router, prefix="/api/v1")
+    register_exception_handlers(app)
 
     def override_get_db():
         """Yield a fresh session from the test factory for every request."""

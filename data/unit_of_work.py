@@ -63,9 +63,11 @@ class UnitOfWork:
         Returns:
             UnitOfWork: The active UoW instance.
         """
+        # Open a fresh DB session — this is the transaction boundary
         self._session = self._db_service.get_session()
 
-        # Inject the single shared session and session_id into all repositories
+        # All repositories share this SAME session so that a single commit/rollback
+        # at __exit__ applies atomically to all operations across workers and shifts
         self.workers = SQLWorkerRepository(self._session, self._session_id)
         self.shifts = SQLShiftRepository(self._session, self._session_id)
 
@@ -84,14 +86,18 @@ class UnitOfWork:
         """
         try:
             if exc_type:
-                # An exception occurred inside the 'with' block
+                # An exception occurred inside the 'with' block — discard
+                # all pending changes to leave the DB in a consistent state
                 self._session.rollback()
             else:
-                # Happy path: everything worked
+                # Happy path: persist all accumulated changes from every
+                # repository operation performed inside the 'with' block
                 self._session.commit()
         except Exception as e:
-            # If commit fails, we must rollback too
+            # If commit itself fails (e.g., constraint violation at DB level),
+            # roll back to prevent a half-committed transaction
             self._session.rollback()
             raise e
         finally:
+            # Always release the connection back to the pool
             self._session.close()

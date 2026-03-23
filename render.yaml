@@ -18,8 +18,15 @@ services:
         fromDatabase:
           name: shiftapp-db
           property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: shiftapp-rate-limit
+          property: connectionString
       - key: SECRET_KEY
         generateValue: true
+      - key: ENVIRONMENT
+        value: production
       - key: CORS_ORIGINS
         value: https://shiftapp-ui.onrender.com
       - key: SOLVER_MAX_WORKERS
@@ -44,6 +51,13 @@ services:
     envVars:
       - key: VITE_API_BASE
         value: https://shiftapp-api.onrender.com/api/v1
+
+  # ===== Redis-Compatible Key Value Store =====
+  - type: keyvalue
+    name: shiftapp-rate-limit
+    region: oregon
+    plan: starter
+    maxmemoryPolicy: allkeys-lru
 
 databases:
   - name: shiftapp-db
