@@ -177,23 +177,19 @@ class ExcelService:
         #       constraint types (skipped), invalid parameter values (defaulted).
 
         Stages:
-            1. Saves upload to temp file.
-            2. Pre-validates the data (collects all errors).
-            3. Runs the external ExcelParser.
-            4. Adapts and saves constraints to the DB.
+            1. Pre-validates the data from in-memory bytes (collects all errors).
+            2. Passes pre-parsed DataFrames to the ExcelParser (no double read).
+            3. Adapts and saves constraints to the DB.
 
         Raises:
             ImportValidationException: If validation errors are found.
             ValueError: If a server error occurs during import.
         """
-        tmp_path: Optional[str] = None
-
         logger.info(f"Starting Excel import for session: {self.session_id}")
 
         try:
-            tmp_path = self._write_temp_file(file_content)
-            validation_result = self._run_prevalidation(tmp_path)
-            parser = self._run_parser(tmp_path)
+            validation_result, sheet_frames = self._run_prevalidation(file_content)
+            parser = self._run_parser(sheet_frames=sheet_frames)
             constraint_errors = self._save_constraints(parser)
 
             logger.debug("Parsing finished, committing to DB")
@@ -214,84 +210,63 @@ class ExcelService:
                 "An unexpected error occurred while processing the Excel file. "
                 "Please verify the file format and structure."
             )
-        finally:
-            self._cleanup_temp_file(tmp_path)
 
-    def _write_temp_file(self, file_content: bytes) -> str:
-        """Write raw upload bytes to a temp file for pandas/openpyxl to read.
+    def _run_prevalidation(
+        self, file_content: bytes
+    ) -> tuple[ImportValidationResult, Dict[str, Any]]:
+        """Parse the workbook from in-memory bytes and check for structural errors.
+
+        Reads the Excel file from a ``BytesIO`` wrapper — no temp file needed.
+        Returns both the validation result and the pre-parsed sheet DataFrames
+        so the parser can consume them directly (OPT-A: eliminate double read).
 
         Args:
             file_content: Raw bytes from the uploaded Excel file.
 
         Returns:
-            Absolute path to the created temporary file.
-        """
-        import tempfile
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-            tmp.write(file_content)
-            tmp_path = tmp.name
-
-        logger.debug(f"Temporary file created at: {tmp_path}")
-        return tmp_path
-
-    def _run_prevalidation(self, tmp_path: str) -> ImportValidationResult:
-        """Parse the workbook with pandas and check for structural errors.
-
-        Args:
-            tmp_path: Path to the temporary Excel file.
-
-        Returns:
-            ImportValidationResult containing any non-blocking warnings.
+            A 2-tuple of:
+            - ImportValidationResult containing any non-blocking warnings.
+            - Dict of sheet_name -> DataFrame (potentially auto-corrected).
 
         Raises:
             ImportValidationException: If blocking validation errors are found.
         """
         import pandas as pd
 
-        logger.debug("Running pre-validation on Excel data")
-        xls = pd.ExcelFile(tmp_path)
-        validation_result = self._validate_excel_data(xls)
+        logger.debug("Running pre-validation on in-memory Excel data")
+        xls = pd.ExcelFile(io.BytesIO(file_content))
+        validation_result, sheet_frames = self._validate_excel_data(xls)
 
         if validation_result.has_errors():
             logger.warning(f"Validation failed: {len(validation_result.errors)} errors found")
             raise ImportValidationException(validation_result)
 
-        return validation_result
+        return validation_result, sheet_frames
 
-    def _run_parser(self, tmp_path: str) -> "ExcelParser":
-        """Create and run the ExcelParser on the temp file.
+    def _run_parser(self, *, sheet_frames: Dict[str, Any]) -> "ExcelParser":
+        """Create the ExcelParser and feed it pre-parsed DataFrames.
+
+        Uses ``load_from_frames()`` to skip file I/O entirely — the same
+        DataFrames that were validated (and possibly auto-corrected) are
+        passed directly to the parser.
 
         Uses the module-level ExcelParser import so that test patches on
         ``"services.excel_service.ExcelParser"`` continue to work.
 
         Args:
-            tmp_path: Path to the (pre-validated) temporary Excel file.
+            sheet_frames: Dict of sheet_name -> DataFrame from prevalidation.
 
         Returns:
             The populated ExcelParser instance (workers/shifts written to repos).
-
-        Raises:
-            NotImplementedError: If ExcelParser has no recognized entry method.
         """
         logger.debug("Using non-destructive import (upsert mode)")
-        logger.debug("Initializing ExcelParser")
+        logger.debug("Initializing ExcelParser with in-memory frames")
         parser = ExcelParser(
             worker_repo=self.worker_repo,
             shift_repo=self.shift_repo
         )
 
-        # Dynamically invoke whichever entry method the parser exposes.
-        if hasattr(parser, 'load_from_file'):
-            parser.load_from_file(tmp_path)
-        elif hasattr(parser, 'parse_file'):
-            parser.parse_file(tmp_path)
-        elif hasattr(parser, 'parse'):
-            parser.parse(tmp_path)
-        elif hasattr(parser, 'load'):
-            parser.load(tmp_path)
-        else:
-            raise NotImplementedError("ExcelParser has no recognized entry method.")
+        parser.load_from_frames(sheet_frames)
 
         logger.debug("Extracting and adapting parsed constraints")
         return parser
@@ -348,20 +323,6 @@ class ExcelService:
 
         return result
 
-    def _cleanup_temp_file(self, tmp_path: Optional[str]) -> None:
-        """Remove the temp file, ignoring errors.
-
-        Args:
-            tmp_path: Path to the temporary file, or None if it was never created.
-        """
-        import os
-
-        if tmp_path and os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except OSError as e:
-                logger.debug("Failed to remove temp file %s: %s", tmp_path, e)
-
     def export_excel(self) -> io.BytesIO:
         return self._exporter.export_excel()
 
@@ -378,7 +339,7 @@ class ExcelService:
         return self._importer._find_column(df, candidates)
 
     def _validate_excel_data(self, xls):
-        return self._importer._validate_excel_data(xls)
+        return self._importer._validate_excel_data(xls)  # returns (result, sheet_frames)
 
     def _validate_workers_sheet(self, df, result):
         return self._importer._validate_workers_sheet(df, result)

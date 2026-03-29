@@ -7,7 +7,12 @@
 
 import React, { useState, useCallback } from 'react';
 import { Plus } from 'lucide-react';
-import { buildDefaultParamsFromSchema, normalizeParamsForStrictness } from '../utils/constraintHelpers';
+import {
+    buildDefaultParamsFromSchema,
+    normalizeConstraintKind,
+    normalizeConstraintStrictness,
+    normalizeParamsForStrictness,
+} from '../utils/constraintHelpers';
 import { HelpPopover } from '../../../../help';
 
 /**
@@ -22,7 +27,7 @@ const AddConstraintPanel = React.memo(({ schemas, onAdd }) => {
     const handleTypeChange = useCallback((value) => {
         setSelectedType(value);
         const schema = schemas.find((s) => s.key === value);
-        setSelectedStrictness(schema?.constraint_type || 'SOFT');
+        setSelectedStrictness(normalizeConstraintStrictness(schema?.constraint_type, 'SOFT'));
     }, [schemas]);
 
     const handleAdd = useCallback(() => {
@@ -75,7 +80,7 @@ const AddConstraintPanel = React.memo(({ schemas, onAdd }) => {
                     <option value="">Add a constraint...</option>
                     {schemas.map(s => (
                         <option key={s.key} value={s.key}>
-                            {s.constraint_kind === 'DYNAMIC' ? 'Dynamic: ' : 'Static: '}
+                            {normalizeConstraintKind(s.constraint_kind) === 'DYNAMIC' ? 'Dynamic: ' : 'Static: '}
                             {s.label}
                         </option>
                     ))}

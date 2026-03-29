@@ -50,11 +50,14 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" || exit 1
 
 # Default command: Gunicorn with Uvicorn workers
-# 4 workers for ~20 concurrent users
-CMD ["gunicorn", "app.main:app", \
-     "--workers", "4", \
-     "--worker-class", "uvicorn.workers.UvicornWorker", \
-     "--bind", "0.0.0.0:8000", \
-     "--timeout", "120", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-"]
+# Worker count configurable via GUNICORN_WORKERS env var
+ENV GUNICORN_WORKERS=2
+CMD ["sh", "-c", "gunicorn app.main:app \
+     --workers ${GUNICORN_WORKERS} \
+     --worker-class uvicorn.workers.UvicornWorker \
+     --bind 0.0.0.0:8000 \
+     --timeout 120 \
+     --forwarded-allow-ips='*' \
+     --proxy-headers \
+     --access-logfile - \
+     --error-logfile -"]

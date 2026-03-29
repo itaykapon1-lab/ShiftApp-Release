@@ -14,13 +14,17 @@ build/
 
 # ===== Environment & Secrets =====
 .env
+.env.*
 .env.local
 .env.*.local
+!.env.production.example
 *.pem
 
 # ===== Database =====
 *.db
 *.sqlite3
+*.db-shm
+*.db-wal
 
 # ===== Node.js / Frontend =====
 node_modules/
@@ -61,10 +65,20 @@ CLAUDE.md
 DEEPDIVE/
 
 # ===== Purged Content (prevent re-introduction) =====
-frontend/package-lock.json
+# frontend/package-lock.json  # Un-ignored: required by npm ci for deterministic Docker builds
 *.xlsx
 *.csv
 docs/
 scripts/generate_*.py
 scripts/migrate_*.py
 frontend/src/tests/
+tests/chaos
+tests/data
+tests/e2e
+tests/fixtures
+tests/infrastructure
+tests/performance
+tests/unit
+tests/integration
+scripts/*
+!scripts/init-db.sql

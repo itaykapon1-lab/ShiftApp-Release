@@ -17,6 +17,7 @@ import { buildErrorMap } from '../../../utils/constraintErrorMapping';
 import { HelpButton, HelpPopover } from '../../../help';
 
 import {
+    normalizeConstraintKind,
     toInstance,
     toApiConstraint,
     serializeInstance,
@@ -291,7 +292,7 @@ const ConstraintsTab = ({ constraints: propConstraints, onConstraintsReplace, wo
                 .toLowerCase();
             const schema = normalizedTypeKey ? schemaByTypeKey.get(normalizedTypeKey) : undefined;
             const rawKind = schema?.constraint_kind ?? inst?.constraintKind ?? inst?.constraint_kind ?? inst?.kind;
-            const normalizedKind = typeof rawKind === 'string' ? rawKind.toUpperCase() : '';
+            const normalizedKind = normalizeConstraintKind(rawKind);
             const hasWorkerPairParams = Boolean(inst?.params?.worker_a_id || inst?.params?.worker_b_id);
 
             const isDynamic =

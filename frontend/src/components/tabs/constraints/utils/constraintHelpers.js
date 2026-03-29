@@ -8,6 +8,20 @@
 export const DEFAULT_SOFT_PENALTY = -10;
 export const STRESS_SEED = 20260215;
 
+export function normalizeConstraintStrictness(value, fallback = 'SOFT') {
+    const normalized = String(value ?? '').trim().toLowerCase();
+    if (normalized === 'hard') return 'HARD';
+    if (normalized === 'soft') return 'SOFT';
+    return fallback;
+}
+
+export function normalizeConstraintKind(value, fallback = '') {
+    const normalized = String(value ?? '').trim().toLowerCase();
+    if (normalized === 'dynamic') return 'DYNAMIC';
+    if (normalized === 'static') return 'STATIC';
+    return fallback;
+}
+
 /**
  * Check whether a constraint schema defines a specific field.
  *
@@ -127,7 +141,7 @@ export function toInstance(constraint, idx) {
         backendId: constraint.id,
         typeKey,
         constraintKind,
-        params: constraint.params || {},
+        params: constraint.params ? { ...constraint.params } : {},
         enabled: constraint.enabled !== false,
         name: constraint.name,
         description: constraint.description,
@@ -149,7 +163,7 @@ export function toApiConstraint(inst) {
         enabled: inst.enabled !== false,
         name: inst.name,
         description: inst.description,
-        params: inst.params,
+        params: inst.params ? { ...inst.params } : {},
     };
 }
 

@@ -1,11 +1,12 @@
 # ===========================================
 # ShiftApp Docker Compose Configuration
 # ===========================================
-# Production-ready stack with PostgreSQL
+# Production-ready stack with PostgreSQL, Caddy
+# reverse proxy, and containerized frontend.
 #
 # Usage:
 #   Development (SQLite): python -m uvicorn app.main:app --reload
-#   Production (Docker):  docker-compose up -d
+#   Production (Docker):  docker compose up -d
 #
 # ===========================================
 
@@ -20,16 +21,18 @@ services:
     environment:
       POSTGRES_DB: shiftapp
       POSTGRES_USER: shiftapp
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-shiftapp_secret}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is required}
     volumes:
       - pgdata:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+      - ./scripts/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    shm_size: 256mb
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U shiftapp -d shiftapp"]
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - backend-net
     restart: unless-stopped
 
   # ===========================================
@@ -41,31 +44,70 @@ services:
       dockerfile: Dockerfile
     container_name: shiftapp-api
     environment:
-      DATABASE_URL: postgresql://shiftapp:${DB_PASSWORD:-shiftapp_secret}@db:5432/shiftapp
-      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
+      DATABASE_URL: postgresql://shiftapp:${DB_PASSWORD:?DB_PASSWORD is required}@db:5432/shiftapp
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY is required}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
-      SOLVER_MAX_WORKERS: ${SOLVER_MAX_WORKERS:-4}
+      SOLVER_MAX_WORKERS: ${SOLVER_MAX_WORKERS:-2}
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-2}
+      ENVIRONMENT: ${ENVIRONMENT:?ENVIRONMENT must be explicitly set to production or development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-10}
     depends_on:
       db:
         condition: service_healthy
-    ports:
-      - "8000:8000"
+    networks:
+      - proxy-net
+      - backend-net
     restart: unless-stopped
 
   # ===========================================
-  # Frontend (Optional - for full stack)
+  # React Frontend (Nginx)
   # ===========================================
-  # frontend:
-  #   build:
-  #     context: ./frontend
-  #     dockerfile: Dockerfile
-  #   container_name: shiftapp-frontend
-  #   ports:
-  #     - "3000:80"
-  #   depends_on:
-  #     - api
-  #   restart: unless-stopped
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE: ${VITE_API_BASE:-/api/v1}
+    container_name: shiftapp-frontend
+    depends_on:
+      - api
+    networks:
+      - proxy-net
+    restart: unless-stopped
+
+  # ===========================================
+  # Caddy Reverse Proxy (TLS termination)
+  # ===========================================
+  caddy:
+    image: caddy:2-alpine
+    container_name: shiftapp-caddy
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - api
+      - frontend
+    networks:
+      - proxy-net
+    restart: unless-stopped
+
+networks:
+  proxy-net:
+    driver: bridge
+  backend-net:
+    driver: bridge
 
 volumes:
   pgdata:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
     driver: local

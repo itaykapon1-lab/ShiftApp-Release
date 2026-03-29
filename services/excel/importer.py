@@ -6,7 +6,6 @@ to the validator, preserving the proxy chain used by ExcelService and tests.
 """
 
 import logging
-import os
 from typing import Dict, Any, Optional, List
 
 import pandas as pd
@@ -57,46 +56,29 @@ class ExcelImporter:
     def _validate_constraints_sheet(self, df: pd.DataFrame, result) -> bool:
         return self._validator._validate_constraints_sheet(df, result)
 
-    def _validate_excel_data(self, xls: pd.ExcelFile) -> Any:
+    def _validate_excel_data(self, xls: pd.ExcelFile) -> tuple[Any, Dict[str, pd.DataFrame]]:
         """Pre-validate Excel data before importing.
+
+        Returns the validation result alongside the (potentially auto-corrected)
+        sheet DataFrames so the caller can pass them directly to the parser
+        without re-reading the file from disk.
 
         Args:
             xls: An open pandas ExcelFile to validate.
 
         Returns:
-            ImportValidationResult with all errors/warnings found.
-            (Return type is ``Any`` to avoid circular import at runtime;
-            the actual type is ``services.excel_service.ImportValidationResult``.)
+            A 2-tuple of:
+            - ImportValidationResult with all errors/warnings found.
+              (Return type component is ``Any`` to avoid circular import at
+              runtime; the actual type is
+              ``services.excel_service.ImportValidationResult``.)
+            - Dict of sheet_name -> DataFrame (corrected in-memory if needed).
         """
         result, corrections_applied, sheet_frames = self._validator.validate(xls)
 
-        # If any auto-corrections were applied (e.g., duplicate ID fix, malformed
-        # task string default), persist the corrected DataFrames back to the temp
-        # file so the parser reads the fixed values.
-        if corrections_applied:
-            self._persist_corrected_workbook(xls, sheet_frames)
+        # Auto-corrections (duplicate IDs, malformed tasks, invalid strictness)
+        # are applied in-place on the DataFrames by the validator.  The corrected
+        # frames are returned directly to the caller — no need to write back to
+        # disk since the parser receives these frames via load_from_frames().
 
-        return result
-
-    def _persist_corrected_workbook(self, xls: pd.ExcelFile, sheets: Dict[str, pd.DataFrame]) -> None:
-        """Persist in-memory sheet corrections back to the source workbook.
-
-        After auto-corrections (duplicate IDs, malformed tasks, invalid strictness),
-        the corrected DataFrames must be written back to the temp file so that the
-        downstream ExcelParser reads the fixed values, not the originals.
-        """
-        source = getattr(xls, "io", None)
-        if not isinstance(source, (str, os.PathLike)):
-            return  # Cannot write back to non-file sources (e.g., BytesIO)
-
-        # Close the ExcelFile handle before overwriting the temp file.
-        if hasattr(xls, "close"):
-            try:
-                xls.close()
-            except Exception as e:
-                logger.debug("Failed to close ExcelFile handle: %s", e)
-
-        # Overwrite the temp file with corrected DataFrames.
-        with pd.ExcelWriter(source, engine="openpyxl", mode="w") as writer:
-            for sheet_name, df in sheets.items():
-                df.to_excel(writer, sheet_name=sheet_name, index=False)
+        return result, sheet_frames

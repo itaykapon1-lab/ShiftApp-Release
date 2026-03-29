@@ -120,10 +120,15 @@ class Settings(BaseSettings):
     @model_validator(mode='after')
     def _reject_default_secret_in_production(self) -> 'Settings':
         """Prevents the application from starting in production with the default dev secret key."""
-        if self.is_production and self.secret_key == "dev-secret-key-change-in-production":
+        _unsafe_keys = {
+            "dev-secret-key-change-in-production",
+            "change-me-in-production",
+        }
+        if self.is_production and self.secret_key in _unsafe_keys:
             raise ValueError(
-                "Production environment must not use the default dev secret key. "
-                "Set the SECRET_KEY environment variable to a secure, random value."
+                "Production environment must not use a default/placeholder secret key. "
+                "Set the SECRET_KEY environment variable to a secure, random value. "
+                f"Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(64))\""
             )
         return self
 

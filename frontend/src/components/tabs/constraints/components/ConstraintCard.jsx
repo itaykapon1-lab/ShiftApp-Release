@@ -6,7 +6,10 @@
 
 import React, { useCallback } from 'react';
 import { Trash2, RefreshCw, Save, CheckCircle2, AlertCircle } from 'lucide-react';
-import { normalizeParamsForStrictness } from '../utils/constraintHelpers';
+import {
+    normalizeConstraintStrictness,
+    normalizeParamsForStrictness,
+} from '../utils/constraintHelpers';
 import SchemaFormField from './SchemaFormField';
 
 /**
@@ -66,7 +69,11 @@ const ConstraintCard = React.memo(({
             ? `Pair: ${workerAName} + ${workerBName}`
             : schema?.label || instance.typeKey);
 
-    const isHard = instance.type === 'HARD';
+    const displayStrictness = normalizeConstraintStrictness(
+        instance.type ?? instance.params?.strictness,
+        'SOFT'
+    );
+    const isHard = displayStrictness === 'HARD';
 
     return (
         <div className={`p-4 rounded-lg border-2 transition-all ${
@@ -85,7 +92,7 @@ const ConstraintCard = React.memo(({
                     <div>
                         <div className="flex items-center gap-2">
                             <select
-                                value={instance.type || 'SOFT'}
+                                value={displayStrictness}
                                 onChange={(e) => updateStrictness(e.target.value)}
                                 className={`px-2 py-0.5 rounded-lg text-xs font-bold border cursor-pointer ${
                                     isHard

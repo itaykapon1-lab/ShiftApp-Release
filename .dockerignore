@@ -1,0 +1,73 @@
+# ===========================================
+# ShiftApp Docker Build Exclusions
+# ===========================================
+# Keeps the build context small and prevents
+# secrets, dev artifacts, and unnecessary files
+# from being copied into the image.
+
+# Version control
+.git
+.github
+
+# AI agent / local dev
+.claude
+CLAUDE.md
+DEEPDIVE/
+
+# Python bytecode
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Frontend (backend image doesn't need these)
+node_modules
+frontend/node_modules
+frontend/dist
+
+# Local databases
+*.db
+*.sqlite3
+*.db-shm
+*.db-wal
+scheduler.db
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# Testing & coverage
+.pytest_cache
+htmlcov
+.coverage
+.tox
+.test_tmp
+.codex_tmp
+tests
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# Docker & deployment (don't nest these in the image)
+pgdata
+docker-compose*.yml
+Caddyfile
+Dockerfile
+frontend/Dockerfile
+frontend/nginx.conf
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Misc
+*.md
+!alembic/README
+*.log
+scripts

@@ -1,0 +1,47 @@
+# ===========================================
+# ShiftApp — Caddy Reverse Proxy
+# ===========================================
+# Automatic HTTPS via Let's Encrypt.
+# Routes traffic to backend API and frontend.
+#
+# The {$DOMAIN} placeholder is replaced by the
+# DOMAIN environment variable at runtime.
+
+{$DOMAIN} {
+    # -----------------------------------------
+    # API routes → FastAPI backend
+    # -----------------------------------------
+    handle /api/v1/* {
+        reverse_proxy api:8000
+    }
+
+    handle /health {
+        reverse_proxy api:8000
+    }
+
+    # -----------------------------------------
+    # Everything else → Frontend (Nginx)
+    # -----------------------------------------
+    handle {
+        reverse_proxy frontend:80
+    }
+
+    # -----------------------------------------
+    # Security headers
+    # -----------------------------------------
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        -Server
+    }
+
+    # -----------------------------------------
+    # Logging
+    # -----------------------------------------
+    log {
+        output stdout
+        format console
+    }
+}

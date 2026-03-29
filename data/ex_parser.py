@@ -132,6 +132,52 @@ class ExcelParser:
             logger.error(f"Parsing error: {e}", exc_info=True)
             raise
 
+    def load_from_frames(
+        self,
+        sheet_frames: Dict[str, pd.DataFrame],
+        session_id: Optional[str] = None,
+    ) -> None:
+        """Load data from pre-parsed DataFrames (skips file I/O).
+
+        Accepts the same ``sheet_frames`` dict returned by
+        ``WorkbookValidator.validate()``.  Delegates to the same
+        ``_process_workers()``, ``_process_shifts()``, and
+        ``_parse_raw_constraints()`` methods used by ``load_from_file()``.
+
+        Args:
+            sheet_frames: Dict mapping sheet names to DataFrames.
+                Must contain ``'Workers'`` and ``'Shifts'`` keys.
+                ``'Constraints'`` key is optional.
+            session_id: Optional session ID (unused, for interface symmetry
+                with ``load_from_file``).
+
+        Raises:
+            ValueError: If the required ``'Workers'`` or ``'Shifts'``
+                sheet is missing from ``sheet_frames``.
+        """
+        self.start_date = self._get_canonical_sunday()
+        self._raw_constraints = []
+        self._warnings = []
+        logger.info(
+            "Using Canonical Epoch Week for in-memory import "
+            f"(start: {self.start_date.date()})"
+        )
+
+        if 'Workers' in sheet_frames:
+            self._process_workers(sheet_frames['Workers'])
+        else:
+            raise ValueError("Missing 'Workers' sheet.")
+
+        if 'Shifts' in sheet_frames:
+            self._process_shifts(sheet_frames['Shifts'])
+        else:
+            raise ValueError("Missing 'Shifts' sheet.")
+
+        if 'Constraints' in sheet_frames:
+            self._parse_raw_constraints(sheet_frames['Constraints'])
+
+        logger.info("In-memory parsing complete. Data loaded into repositories.")
+
     def get_constraint_registry(self) -> ConstraintRegistry:
         """Builds and returns the constraint registry based on parsed data."""
         # Start with built-in constraints (coverage, max hours, etc.)
