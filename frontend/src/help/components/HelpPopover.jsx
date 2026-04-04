@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Info } from 'lucide-react';
-import { useHelp } from '../HelpProvider';
+import { useHelp } from '../context';
 
 const placementClasses = {
     top: 'bottom-full mb-2 left-1/2 -translate-x-1/2',

@@ -1,6 +1,6 @@
 import React from 'react';
 import { CircleHelp } from 'lucide-react';
-import { useHelp } from '../HelpProvider';
+import { useHelp } from '../context';
 
 const variantClasses = {
     subtle: 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50',

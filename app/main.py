@@ -9,6 +9,7 @@ import uuid
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
+import sqlalchemy
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -96,7 +97,16 @@ async def lifespan(app: FastAPI):
     # and fileConfig(disable_existing_loggers=True) would kill uvicorn's loggers,
     # silencing "Application startup complete" and all subsequent INFO messages.
     alembic_cfg.attributes["configure_logger"] = False
-    command.upgrade(alembic_cfg, "head")
+    try:
+        command.upgrade(alembic_cfg, "head")
+    except Exception as exc:
+        from app.db.session import engine
+
+        inspector = sqlalchemy.inspect(engine)
+        existing_tables = inspector.get_table_names()
+        if not existing_tables:
+            raise RuntimeError("Alembic failed on an empty database") from exc
+        raise
     logger.info("Database schema up to date")
 
     logger.info("Registering constraint definitions...")

@@ -79,7 +79,7 @@ const Modal = ({ isOpen, onClose, title, children, size = 'md' }) => {
 
     return (
         <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm p-2 sm:p-4"
             onClick={handleBackdropClick}
             role="dialog"
             aria-modal="true"
@@ -90,8 +90,8 @@ const Modal = ({ isOpen, onClose, title, children, size = 'md' }) => {
                 tabIndex={-1}
                 className={`bg-white rounded-2xl shadow-2xl w-full ${widthClass} overflow-hidden max-h-[90vh] flex flex-col outline-none`}
             >
-                <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4 flex justify-between items-center">
-                    <h2 id="modal-title" className="text-xl font-bold text-white">{title}</h2>
+                <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-3 sm:px-6 sm:py-4 flex justify-between items-center">
+                    <h2 id="modal-title" className="text-base sm:text-xl font-bold text-white">{title}</h2>
                     <button
                         onClick={onClose}
                         className="text-white hover:bg-white hover:bg-opacity-20 rounded-full p-2 transition-all"
@@ -100,7 +100,7 @@ const Modal = ({ isOpen, onClose, title, children, size = 'md' }) => {
                         <X className="w-5 h-5" />
                     </button>
                 </div>
-                <div className="p-6 overflow-y-auto flex-1">{children}</div>
+                <div className="p-3 sm:p-6 overflow-y-auto flex-1">{children}</div>
             </div>
         </div>
     );

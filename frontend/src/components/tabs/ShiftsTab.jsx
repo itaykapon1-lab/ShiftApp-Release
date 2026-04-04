@@ -22,7 +22,7 @@ const formatShiftTime = (shift) => {
             return `${start} - ${end}`;
         }
         return "N/A";
-    } catch (err) {
+    } catch {
         return "Error";
     }
 };
@@ -44,7 +44,7 @@ const formatShiftDay = (shift) => {
             return days[date.getDay()];
         }
         return "N/A";
-    } catch (err) {
+    } catch {
         return "N/A";
     }
 };
@@ -146,14 +146,14 @@ const ShiftsTab = ({ shifts, onAddShift, onEditShift, onDeleteShift }) => {
         <div>
             <div className="flex justify-between items-center mb-6">
                 <div>
-                    <h2 className="text-3xl font-black text-gray-800">Shifts Schedule</h2>
+                    <h2 className="text-xl sm:text-2xl md:text-3xl font-black text-gray-800">Shifts Schedule</h2>
                     <p className="text-gray-600 mt-1">Manage shift timings and requirements</p>
                 </div>
                 <div className="flex items-center gap-2">
                     <HelpButton topicId="shifts.overview" label="Help" />
                     <button
                         onClick={onAddShift}
-                        className="flex items-center px-6 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl font-black shadow-2xl hover:shadow-3xl transition-all hover:scale-105"
+                        className="flex items-center px-4 py-2 sm:px-6 sm:py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl font-black text-sm sm:text-base shadow-2xl hover:shadow-3xl transition-all hover:scale-105"
                     >
                         <CalendarPlus className="w-5 h-5 mr-2" />
                         Add Shift
@@ -173,11 +173,11 @@ const ShiftsTab = ({ shifts, onAddShift, onEditShift, onDeleteShift }) => {
                         <thead className="bg-gradient-to-r from-purple-600 to-pink-600 text-white">
                             <tr className="text-sm font-black uppercase tracking-wider">
                                 {/* REMOVED: ID column - internal use only */}
-                                <th className="py-5 px-6 text-left">Name</th>
-                                <th className="py-5 px-6 text-left">Day</th>
-                                <th className="py-5 px-6 text-left">Time</th>
-                                <th className="py-5 px-6 text-left">Requirements</th>
-                                <th className="py-5 px-6 text-left">Actions</th>
+                                <th className="py-3 px-3 sm:py-5 sm:px-6 text-left">Name</th>
+                                <th className="py-3 px-3 sm:py-5 sm:px-6 text-left">Day</th>
+                                <th className="py-3 px-3 sm:py-5 sm:px-6 text-left">Time</th>
+                                <th className="py-3 px-3 sm:py-5 sm:px-6 text-left">Requirements</th>
+                                <th className="py-3 px-3 sm:py-5 sm:px-6 text-left">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y-2 divide-gray-200">
@@ -187,35 +187,37 @@ const ShiftsTab = ({ shifts, onAddShift, onEditShift, onDeleteShift }) => {
                                     className="hover:bg-gradient-to-r hover:from-purple-50 hover:to-pink-50 transition-all"
                                 >
                                     {/* REMOVED: ID column */}
-                                    <td className="py-5 px-6 font-black text-lg text-gray-900">
+                                    <td className="py-3 px-3 sm:py-5 sm:px-6 font-bold sm:font-black text-sm sm:text-lg text-gray-900">
                                         {getShiftDisplayName(s)}
                                     </td>
-                                    <td className="py-5 px-6">
+                                    <td className="py-3 px-3 sm:py-5 sm:px-6">
                                         <span className="px-3 py-1 bg-gradient-to-r from-indigo-500 to-blue-500 text-white rounded-full text-sm font-bold shadow-md">
                                             {formatShiftDay(s)}
                                         </span>
                                     </td>
-                                    <td className="py-5 px-6 text-sm text-gray-700 font-medium">
+                                    <td className="py-3 px-3 sm:py-5 sm:px-6 text-sm text-gray-700 font-medium">
                                         {formatShiftTime(s)}
                                     </td>
-                                    <td className="py-5 px-6 text-sm text-gray-600">
+                                    <td className="py-3 px-3 sm:py-5 sm:px-6 text-sm text-gray-600">
                                         {formatShiftNeeds(s)}
                                     </td>
-                                    <td className="py-5 px-6">
+                                    <td className="py-3 px-3 sm:py-5 sm:px-6">
                                         <div className="flex gap-2">
                                             <button
                                                 onClick={() => onEditShift(s)}
-                                                className="flex items-center gap-2 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all font-bold text-sm shadow-md hover:shadow-lg"
+                                                aria-label={`Edit ${getShiftDisplayName(s)}`}
+                                                className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-all font-bold text-sm shadow-md hover:shadow-lg"
                                             >
-                                                <Edit className="w-4 h-4" />
-                                                Edit
+                                                <Edit className="w-4 h-4" aria-hidden="true" />
+                                                <span className="hidden sm:inline">Edit</span>
                                             </button>
                                             <button
                                                 onClick={() => handleDelete(s)}
-                                                className="flex items-center gap-2 px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all font-bold text-sm shadow-md hover:shadow-lg"
+                                                aria-label={`Delete ${getShiftDisplayName(s)}`}
+                                                className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-all font-bold text-sm shadow-md hover:shadow-lg"
                                             >
-                                                <Trash2 className="w-4 h-4" />
-                                                Delete
+                                                <Trash2 className="w-4 h-4" aria-hidden="true" />
+                                                <span className="hidden sm:inline">Delete</span>
                                             </button>
                                         </div>
                                     </td>

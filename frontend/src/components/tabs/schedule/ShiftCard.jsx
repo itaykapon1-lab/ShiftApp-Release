@@ -5,6 +5,7 @@
 import React from 'react';
 import { Clock, Users, ChevronRight } from 'lucide-react';
 import ScoreIndicator from './ScoreIndicator';
+import { getDisplayTaskName } from '../../../utils/displayFormatting';
 
 /**
  * ShiftCard Component
@@ -19,7 +20,7 @@ import ScoreIndicator from './ScoreIndicator';
  *   - Each assignment: { worker_name, task, score, score_breakdown, role_details, global_violations }
  * - onClick: Function - callback when card is clicked (for opening modal)
  */
-const ShiftCard = ({ shiftName, timeRange, assignments = [], onClick }) => {
+const ShiftCard = ({ shiftName, timeRange, assignments = [], onClick, workers = [] }) => {
     // Group assignments by task
     const taskGroups = {};
     assignments.forEach((assign) => {
@@ -39,14 +40,14 @@ const ShiftCard = ({ shiftName, timeRange, assignments = [], onClick }) => {
             onKeyDown={(event) => event.key === 'Enter' && onClick && onClick({ shiftName, timeRange, assignments })}
         >
             {/* Header */}
-            <div className="bg-gradient-to-r from-indigo-500 to-purple-500 px-4 py-2 text-white">
+            <div className="bg-gradient-to-r from-indigo-500 to-purple-500 px-2 py-1.5 sm:px-4 sm:py-2 text-white">
                 <div className="flex justify-between items-start">
-                    <h4 className="font-bold text-sm truncate flex-1" title={shiftName}>
+                    <h4 className="font-bold text-xs sm:text-sm truncate flex-1" title={shiftName}>
                         {shiftName}
                     </h4>
                     <ChevronRight className="w-4 h-4 opacity-70" />
                 </div>
-                <div className="flex items-center gap-2 text-xs text-indigo-100 mt-0.5">
+                <div className="flex items-center gap-1 sm:gap-2 text-[10px] sm:text-xs text-indigo-100 mt-0.5">
                     <Clock className="w-3 h-3" />
                     <span>{timeRange}</span>
                     <span className="mx-1">|</span>
@@ -56,18 +57,18 @@ const ShiftCard = ({ shiftName, timeRange, assignments = [], onClick }) => {
             </div>
 
             {/* Assignments */}
-            <div className="p-3 space-y-3">
-                {Object.entries(taskGroups).map(([taskName, workers]) => (
+            <div className="p-1.5 sm:p-3 space-y-2 sm:space-y-3">
+                {Object.entries(taskGroups).map(([taskName, taskAssignments], taskIdx) => (
                     <div key={taskName} className="space-y-1">
                         {/* Task name header (only if multiple tasks or non-default) */}
                         {(Object.keys(taskGroups).length > 1 || taskName !== 'General') && (
                             <div className="text-xs font-bold text-gray-500 uppercase tracking-wide">
-                                {taskName}
+                                {getDisplayTaskName(taskName, taskIdx)}
                             </div>
                         )}
 
                         {/* Workers in this task */}
-                        {workers.map((assign, idx) => (
+                        {taskAssignments.map((assign, idx) => (
                             <div
                                 key={`${assign.worker_name}-${idx}`}
                                 className="flex items-center justify-between py-1.5 px-2 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
@@ -76,7 +77,7 @@ const ShiftCard = ({ shiftName, timeRange, assignments = [], onClick }) => {
                                     <div className="w-6 h-6 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-xs flex-shrink-0">
                                         {assign.worker_name?.charAt(0) || '?'}
                                     </div>
-                                    <span className="text-sm font-medium text-gray-800 truncate">
+                                    <span className="text-xs sm:text-sm font-medium text-gray-800 truncate">
                                         {assign.worker_name}
                                     </span>
                                 </div>
@@ -84,6 +85,7 @@ const ShiftCard = ({ shiftName, timeRange, assignments = [], onClick }) => {
                                     score={assign.score || 0}
                                     breakdown={assign.score_breakdown}
                                     globalViolations={assign.global_violations}
+                                    employees={workers}
                                 />
                             </div>
                         ))}

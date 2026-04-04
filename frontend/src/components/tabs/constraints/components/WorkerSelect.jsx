@@ -7,17 +7,7 @@
  */
 
 import React, { useState, useMemo, useCallback } from 'react';
-
-/**
- * Derives a short suffix from a worker_id for duplicate-name disambiguation.
- * Uses the last 4 characters of the ID (after the last hyphen, if present).
- */
-const shortIdSuffix = (workerId) => {
-    if (!workerId) return '';
-    const parts = workerId.split('-');
-    const last = parts[parts.length - 1];
-    return last.slice(-4);
-};
+import { shortIdSuffix } from '../../../../utils/displayFormatting';
 
 /**
  * @param {Object} props
@@ -71,6 +61,7 @@ const WorkerSelect = React.memo(({ value, onChange, workers, placeholder = 'Sele
     return (
         <div className="relative">
             <div
+                id={id}
                 className="w-full px-3 py-2 border-2 border-gray-200 rounded-lg cursor-pointer bg-white flex justify-between items-center"
                 onClick={() => setIsOpen(!isOpen)}
             >

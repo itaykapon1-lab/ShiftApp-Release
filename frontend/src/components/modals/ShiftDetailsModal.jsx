@@ -4,6 +4,7 @@
 
 import React from 'react';
 import { X, Clock, Users, Briefcase, CheckCircle, XCircle, Star, AlertTriangle } from 'lucide-react';
+import { getDisplayTaskName } from '../../utils/displayFormatting';
 
 // ---------------------------------------------------------------------------
 // Time helpers for overlap-based preference matching
@@ -121,6 +122,9 @@ const ShiftDetailsModal = ({ isOpen, onClose, shift, workers = [] }) => {
         }
         taskGroups[task].push(assign);
     });
+    const taskDisplayIndexByName = new Map(
+        Object.keys(taskGroups).map((taskName, taskIdx) => [taskName, taskIdx])
+    );
 
     // Extract required skills from role_details
     const parseRoleSkills = (roleDetails) => {
@@ -142,12 +146,12 @@ const ShiftDetailsModal = ({ isOpen, onClose, shift, workers = [] }) => {
             />
 
             {/* Modal */}
-            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden mx-4">
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden mx-2 sm:mx-4">
                 {/* Header */}
-                <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-6 py-4 text-white">
+                <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-4 py-3 sm:px-6 sm:py-4 text-white">
                     <div className="flex justify-between items-start">
                         <div>
-                            <h2 className="text-2xl font-black">{shiftName}</h2>
+                            <h2 className="text-lg sm:text-2xl font-black">{shiftName}</h2>
                             <div className="flex items-center gap-3 mt-1 text-indigo-100">
                                 <Clock className="w-4 h-4" />
                                 <span className="font-medium">{timeRange}</span>
@@ -166,7 +170,7 @@ const ShiftDetailsModal = ({ isOpen, onClose, shift, workers = [] }) => {
                 </div>
 
                 {/* Content */}
-                <div className="p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
+                <div className="p-3 sm:p-6 overflow-y-auto max-h-[calc(90vh-120px)]">
                     {/* Tasks & Requirements Overview */}
                     <div className="mb-6">
                         <h3 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
@@ -174,7 +178,7 @@ const ShiftDetailsModal = ({ isOpen, onClose, shift, workers = [] }) => {
                             Tasks & Requirements
                         </h3>
                         <div className="grid gap-3">
-                            {Object.entries(taskGroups).map(([taskName, taskAssignments]) => {
+                            {Object.entries(taskGroups).map(([taskName, taskAssignments], taskIdx) => {
                                 // Collect unique skills required for this task
                                 const requiredSkills = new Set();
                                 taskAssignments.forEach(a => {
@@ -187,7 +191,7 @@ const ShiftDetailsModal = ({ isOpen, onClose, shift, workers = [] }) => {
                                         className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl p-4 border-2 border-indigo-200"
                                     >
                                         <div className="flex justify-between items-center mb-2">
-                                            <h4 className="font-bold text-indigo-900">{taskName}</h4>
+                                            <h4 className="font-bold text-indigo-900">{getDisplayTaskName(taskName, taskIdx)}</h4>
                                             <span className="px-3 py-1 bg-indigo-600 text-white rounded-full text-sm font-bold">
                                                 {taskAssignments.length} assigned
                                             </span>
@@ -266,7 +270,12 @@ const ShiftDetailsModal = ({ isOpen, onClose, shift, workers = [] }) => {
                                                 </div>
                                                 <div>
                                                     <h4 className="font-bold text-gray-900">{assign.worker_name}</h4>
-                                                    <p className="text-sm text-gray-600">{assign.task || 'General Task'}</p>
+                                                    <p className="text-sm text-gray-600">
+                                                        {getDisplayTaskName(
+                                                            assign.task || 'General Task',
+                                                            taskDisplayIndexByName.get(assign.task || 'General') || 0
+                                                        )}
+                                                    </p>
                                                 </div>
                                             </div>
                                             <div className="text-right">
@@ -392,7 +401,7 @@ const ShiftDetailsModal = ({ isOpen, onClose, shift, workers = [] }) => {
                 </div>
 
                 {/* Footer */}
-                <div className="border-t-2 border-gray-200 px-6 py-4 bg-gray-50">
+                <div className="border-t-2 border-gray-200 px-4 py-3 sm:px-6 sm:py-4 bg-gray-50">
                     <button
                         onClick={onClose}
                         className="w-full px-4 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl font-bold hover:from-indigo-700 hover:to-purple-700 transition-colors"

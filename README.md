@@ -1,42 +1,86 @@
-[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com) [![OR-Tools](https://img.shields.io/badge/OR--Tools-MILP-4285F4?logo=google&logoColor=white)](https://developers.google.com/optimization) [![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.x-D71F00)](https://www.sqlalchemy.org/) [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/) [![Tests](https://img.shields.io/badge/tests-460%2B%20passing-brightgreen)](#-testing) [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](#-getting-started) [![License](https://img.shields.io/badge/License-MIT-yellow)](#-license)
+[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)](https://www.python.org/) [![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com) [![OR-Tools](https://img.shields.io/badge/OR--Tools-MILP-4285F4?logo=google&logoColor=white)](https://developers.google.com/optimization) [![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.x-D71F00)](https://www.sqlalchemy.org/) [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)](https://react.dev/) [![Tests](https://img.shields.io/badge/tests-170%2B%20passing-brightgreen)](#-testing) [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)](#-getting-started) [![License](https://img.shields.io/badge/License-MIT-yellow)](#-license)
 
 # ShiftApp
 
-**A production-grade constraint-satisfaction scheduling engine that solves an NP-hard combinatorial optimization problem using Mixed Integer Linear Programming.**
+**An automated employee scheduling system that uses Mixed Integer Linear Programming (MILP) to generate optimal weekly rosters by balancing employer constraints with employee preferences.**
 
-ShiftApp assigns workers to shifts by formulating the problem as a MILP with binary decision variables, hard/soft constraint decomposition via slack variables, and a 4-stage incremental relaxation algorithm that diagnoses mathematical infeasibility. The constraint system is fully extensible through a metadata-driven registry that enforces the Open-Closed Principle — new constraint types require zero modifications to the solver engine.
+At its core, ShiftApp solves the tedious and complex task of shift scheduling. You input your workers, define the required shifts (and the skills needed for them), and set the rules. The system formulates the scenario as a combinatorial optimization problem and runs a mathematical solver to find the absolute best schedule—minimizing rule violations while maximizing worker satisfaction.
+
+Under the hood, it features a robust constraint-satisfaction engine using binary decision variables, hard/soft constraint decomposition via slack variables, and a 4-stage incremental relaxation algorithm that automatically diagnoses mathematical infeasibility. The constraint system is fully extensible through a metadata-driven registry (enforcing the Open-Closed Principle), meaning new business rules can be added without modifying the core solver engine.
 
 ---
 
 ## Why This Project Exists
 
-Shift scheduling is a textbook NP-hard problem (reducible from Set Cover), but the gap between an algorithms textbook and a production system is enormous. This project bridges that gap:
+This project started with a personal realization: the theoretical computer science concepts I was learning in university class (specifically, NP-hard combinatorial problems) had an immediate, real-world application right in front of me. 
 
-- **The mathematical core** — A MILP formulation with two sets of binary decision variables (Y for task option selection, X for worker-to-role assignment) linked through a coverage constraint that ensures staffing requirements match the selected configuration.
-- **The diagnostic engine** — When the solver returns `INFEASIBLE`, a 4-stage incremental relaxation algorithm pinpoints exactly which constraint (or combination of constraints) causes the failure, running asynchronously as a background process.
-- **The extensibility architecture** — The constraint registry uses Strategy + Factory patterns so that adding a new constraint type (Pydantic config, solver implementation, API schema, Excel parser, UI metadata) requires a single registration call. The solver engine is closed for modification, open for extension.
-- **The isolation boundary** — OR-Tools runs in a subprocess via `ProcessPoolExecutor`. Since SQLAlchemy sessions cannot cross process boundaries, a snapshot adapter serializes the entire domain state into a read-only in-memory data manager, achieving full solver-database decoupling.
+The opportunity arose when my brother, a shift manager, continuously complained about the agonizing, hours-long process of manually scheduling his employees every week. Trying to balance availability, skills, company rules, and fairness manually was a nightmare. I decided to take the algorithms out of the textbook and build a production-grade system to solve his exact problem. And the rest is history.
 
-The frontend is a lightweight React UI for data entry and result visualization — the engineering depth lives entirely in the backend.
+While scheduling is a textbook NP-hard problem (reducible from Set Cover), the gap between theory and a production system is enormous. This project bridges that gap through several key architectural pillars:
 
+- **The mathematical core** - A MILP formulation with two sets of binary decision variables (Y for task option selection, X for worker-to-role assignment) linked through a coverage constraint that ensures staffing requirements match the selected configuration.
+- **The diagnostic engine** - When the solver returns `INFEASIBLE` (e.g., you need 5 managers but only have 4), a 4-stage incremental relaxation algorithm pinpoints exactly which constraint causes the failure, running asynchronously as a background process.
+- **The extensibility architecture** - The constraint registry uses Strategy + Factory patterns so that adding a new constraint type (Pydantic config, solver implementation, API schema, Excel parser, UI metadata) requires a single registration call. The solver engine is closed for modification, open for extension.
+- **The isolation boundary** - OR-Tools runs in a subprocess via `ProcessPoolExecutor`. Since SQLAlchemy sessions cannot cross process boundaries, a snapshot adapter serializes the entire domain state into a read-only in-memory data manager, achieving full solver-database decoupling.
+
+- **The frontend** - provides a rich, interactive React UI (including a custom-built interactive onboarding tour) for data entry and result visualization but the heavy engineering depth lives entirely in the backend.
 ---
 
 ## Solver Engine
 
-The solver formulates shift scheduling as a **Mixed Integer Linear Program** and solves it using Google OR-Tools' CBC solver (with SCIP fallback).
+The solver formulates shift scheduling as a **Mixed Integer Linear Program (MILP)** and solves it using Google OR-Tools' `pywraplp` interface with the **CBC** solver (SCIP fallback).
 
-### Problem Formulation
+### Mathematical Formulation
 
-**Objective:** Maximize total schedule quality (worker preference scores minus constraint violation penalties).
+#### Sets
 
-**Decision Variables:**
+| Symbol | Definition |
+|--------|-----------|
+| **W** | Set of all workers |
+| **S** | Set of all shifts |
+| **T_s** | Set of tasks within shift *s* |
+| **O_t** | Set of staffing options for task *t* (exactly one must be selected) |
+| **R_o** | Set of (role, count) requirements defined by option *o* |
+| **E_r** | Set of workers eligible for role *r* (skill + availability filter) |
 
-| Variable | Type | Meaning |
-|----------|------|---------|
-| **Y**_(shift, task, option)_ | Binary | 1 if task option is selected for a shift, 0 otherwise |
-| **X**_(worker, shift, task, role)_ | Binary | 1 if worker is assigned to a role in a task, 0 otherwise |
+#### Decision Variables
 
-**Key Invariant:** Exactly one option must be selected per task (`Sum(Y) = 1`), and the number of workers assigned to each role must equal the staffing requirement of the selected option (`Sum(X) = Sum(count * Y)`).
+| Variable | Domain | Semantics |
+|----------|--------|-----------|
+| **Y**_(s,t,o)_ | {0, 1} | 1 if staffing option *o* is selected for task *t* in shift *s* |
+| **X**_(w,s,t,r)_ | {0, 1} | 1 if worker *w* is assigned to role *r* in task *t* during shift *s* |
+
+Variables are constructed by `VariableBuilder` (`solver/variable_builder.py`), which also builds two secondary indexes consumed by constraints:
+
+| Index | Key | Value | Used By |
+|-------|-----|-------|---------|
+| `worker_shift_assignments` | (worker_id, shift_id) | [X variables] | Intra-shift constraints (exclusivity) |
+| `worker_global_assignments` | worker_id | [(Shift, X variable)] | Inter-shift constraints (max hours, consecutive) |
+
+A **circuit breaker** aborts variable construction if the total count exceeds `MAX_SOLVER_VARIABLES` (50,000) to prevent OOM on pathologically large inputs.
+
+#### Structural Constraint (Option Selection)
+
+Exactly one staffing option must be selected per task — this is enforced **before** the constraint registry runs:
+
+```
+∀ s ∈ S, t ∈ T_s:   Σ_{o ∈ O_t} Y_(s,t,o) = 1
+```
+
+#### Objective Function
+
+The solver **maximizes** total schedule quality:
+
+```
+maximize   Σ (preference rewards)  −  Σ (soft constraint penalties)
+
+         = Σ_{w,s,t,r} reward(w,s) · X_(w,s,t,r)
+         − Σ_{w} penalty_per_hour · SlackHours_w
+         − Σ_{pairs} penalty · ViolationIndicator
+         − Σ_{s,t,o} priority_penalty(rank_o) · Y_(s,t,o)
+```
+
+Each soft constraint injects its own penalty terms into the objective — the solver balances schedule feasibility against quality trade-offs.
 
 ### Constraint Types
 
@@ -45,59 +89,17 @@ The solver formulates shift scheduling as a **Mixed Integer Linear Program** and
 | 1 | **Coverage** | Hard | Y-X variable linkage | `static_hard.py` |
 | 2 | **Intra-Shift Exclusivity** | Hard | `Sum(X) <= 1` per (worker, shift) | `static_hard.py` |
 | 3 | **Overlap Prevention** | Hard | Sorted time-window pairwise exclusion | `static_hard.py` |
-| 4 | **Max Hours/Week** | Soft | Slack variable penalty | `static_soft.py` |
-| 5 | **Avoid Consecutive Shifts** | Soft | Indicator variable penalty | `static_soft.py` |
-| 6 | **Worker Preferences** | Soft | Objective coefficient injection | `static_soft.py` |
+| 4 | **Max Hours/Week** | Soft | Continuous slack variable (`NumVar`) penalty | `static_soft.py` |
+| 5 | **Avoid Consecutive Shifts** | Soft | Boolean indicator variable (`BoolVar`) penalty | `static_soft.py` |
+| 6 | **Worker Preferences** | Soft | Direct objective coefficient injection on X | `static_soft.py` |
 | 7 | **Task Option Priority** | Soft | Rank-weighted Y penalty | `static_soft.py` |
-| 8 | **Mutual Exclusion** | Dynamic | Pairwise `X_a + X_b <= 1` | `dynamic.py` |
-| 9 | **Co-Location** | Dynamic | Indicator + penalty pairing | `dynamic.py` |
+| 8 | **Mutual Exclusion** | Dynamic | Pairwise `X_a + X_b <= 1` (hard) or indicator penalty (soft) | `dynamic.py` |
+| 9 | **Co-Location** | Dynamic | `X_a == X_b` (hard) or difference indicator penalty (soft) | `dynamic.py` |
 
-### Slack Variable Technique (Soft Constraints)
+Constraints are applied in **two phases** by the `ConstraintRegistry` (`solver/constraints/registry.py`):
+1. **Phase 1 — Hard constraints**: Applied first to define the feasible region via `solver.Add()`.
+2. **Phase 2 — Soft constraints**: Applied second to inject penalty/reward coefficients via `solver.Objective().SetCoefficient()`.
 
-Soft constraints use slack variables to convert hard limits into objective function penalties. This is the core technique that makes schedules *flexible* — the solver can exceed a limit if the overall schedule quality improves:
-
-```python
-# solver/constraints/static_soft.py — MaxHoursPerWeekConstraint.apply()
-
-for worker in context.workers:
-    total_hours_expr = 0
-    for shift, x_var in context.worker_global_assignments[worker.worker_id]:
-        total_hours_expr += shift.time_window.duration_hours * x_var
-
-    if self.type == ConstraintType.HARD:
-        # HARD: strictly forbid exceeding max_hours
-        context.solver.Add(total_hours_expr <= self.max_hours)
-    else:
-        # SOFT: slack variable absorbs the overage, penalized in objective
-        slack_var = context.solver.NumVar(0.0, context.solver.infinity(), slack_name)
-        context.solver.Add(total_hours_expr - self.max_hours <= slack_var)
-        context.solver.Objective().SetCoefficient(slack_var, self.penalty_per_hour)
-```
-
-If a worker exceeds `max_hours`, the slack variable `S_w` absorbs the overage. The objective function penalizes each excess hour at `penalty_per_hour`, letting the solver decide whether the trade-off is worth it.
-
-### Coverage Constraint (Y-X Variable Linkage)
-
-This is the constraint that connects *what configuration was chosen* (Y) with *who is assigned* (X):
-
-```python
-# solver/constraints/static_hard.py — CoverageConstraint.apply()
-
-# For each role in each task:
-# Sum(workers assigned to role) == Sum(option_Y * required_count)
-for role_sig, req_info in role_requirements_map.items():
-    assigned_workers_vars = x_vars_by_role[(shift.shift_id, task.task_id, role_sig)]
-
-    required_count_expression = 0
-    for opt_idx, count in req_info:
-        y_var = context.y_vars.get((shift.shift_id, task.task_id, opt_idx))
-        if y_var is not None:
-            required_count_expression += count * y_var
-
-    context.solver.Add(sum(assigned_workers_vars) == required_count_expression)
-```
-
----
 
 ## Infeasibility Diagnosis Engine
 
@@ -227,9 +229,10 @@ PENDING → RUNNING → COMPLETED (with optional background diagnostics)
 |  Repository Layer           |  |  Solver Engine (subprocess)              |
 |  (repositories/)            |  |  (solver/)                              |
 |                             |  |                                         |
-|  Protocol-based ABCs        |  |  OR-Tools MILP (CBC/SCIP)              |
-|  Multi-tenant filtering     |  |  ConstraintRegistry (2-phase)          |
-|  Canonical week normalizer  |  |  Infeasibility Diagnostics             |
+|  Protocol-based ABCs        |  |  solver_engine.py  — MILP formulation   |
+|  Multi-tenant filtering     |  |  variable_builder.py — Y/X construction |
+|  Canonical week normalizer  |  |  diagnostics_engine.py — 4-stage diag.  |
+|  Session guard (FK enforce) |  |  constraints/ — Registry (2-phase OCP)  |
 +--------------+--------------+  +-----------------------------------------+
                |
 +--------------v--------------+
@@ -287,7 +290,7 @@ Schedules represent a *typical week*, not a specific calendar date. Every dateti
 | **pandas + openpyxl** | Excel import/export pipeline |
 | **Docker + Gunicorn** | Production deployment with Uvicorn workers |
 | **Redis** | Shared rate-limit counters across Gunicorn workers |
-| **pytest** | 460+ tests across 5 tiers |
+| **pytest** | 490+ tests — unit, integration, E2E, chaos |
 
 ### Frontend
 
@@ -380,91 +383,90 @@ This starts the FastAPI backend + PostgreSQL database. The API is available at `
 
 ```
 ShiftApp/
-├── api/routers/                 # FastAPI route handlers (traffic cops only)
-│   ├── worker_routes.py
-│   ├── shift_routes.py
-│   ├── constraint_routes.py
-│   ├── solver_routes.py
-│   └── import_export_routes.py
-├── services/                    # Business logic orchestration
-│   ├── solver_service.py        # Async job lifecycle + ProcessPoolExecutor
-│   ├── solver_job_store.py      # PENDING -> RUNNING -> COMPLETED state machine
-│   ├── session_adapter.py       # Cross-process domain snapshot adapter
-│   └── excel/                   # Facade: importer, exporter, constraint mapper
-├── solver/
-│   ├── solver_engine.py         # MILP formulation + infeasibility diagnosis
-│   └── constraints/
-│       ├── definitions.py       # <- SINGLE SOURCE OF TRUTH (registry + OCP)
-│       ├── base.py              # IConstraint protocol + SolverContext
-│       ├── registry.py          # ConstraintRegistry (2-phase: hard then soft)
-│       ├── static_hard.py       # Coverage, exclusivity, overlap prevention
-│       ├── static_soft.py       # Max hours, preferences, consecutive shifts
-│       └── dynamic.py           # Mutual exclusion, co-location
-├── repositories/                # DB access layer + canonical week normalization
-│   ├── interfaces.py            # Protocol ABCs (IWorkerRepository, IDataManager)
-│   ├── sql_worker_repo.py
-│   └── sql_shift_repo.py
-├── domain/                      # Pure dataclasses — zero I/O, zero dependencies
+├── .github/workflows/              # CI pipeline
+├── alembic/                        # Database migrations (7 versions)
+│   └── versions/
+├── api/                            # HTTP layer (traffic cops only)
+│   ├── routers/
+│   │   ├── worker_routes.py
+│   │   ├── shift_routes.py
+│   │   ├── constraint_routes.py
+│   │   ├── solver_routes.py
+│   │   ├── import_export_routes.py
+│   │   ├── session_routes.py
+│   │   └── helpers.py
+│   ├── deps.py                     # Dependency injection (DB session, repos)
+│   └── routes.py                   # Central router aggregation
+├── app/                            # FastAPI application core
+│   ├── core/
+│   │   ├── config.py               # Pydantic Settings — all env vars, validation
+│   │   ├── constants.py            # Solver defaults, penalty values, limits
+│   │   ├── rate_limiter.py         # SlowAPI + optional Redis backend
+│   │   ├── security_headers.py     # HSTS, X-Frame-Options, CSP
+│   │   ├── exception_handlers.py   # Global error handling (dev vs. prod)
+│   │   └── exceptions.py           # Custom exception hierarchy
+│   ├── db/session.py               # Engine creation, connection pooling
+│   ├── schemas/                    # Pydantic request/response models
+│   ├── utils/
+│   │   ├── date_normalization.py   # Canonical epoch helpers
+│   │   └── result_formatter.py     # Solver output presentation
+│   └── main.py                     # FastAPI app, lifespan, middleware stack
+├── data/                           # ORM models & data-layer utilities
+│   ├── models.py                   # SQLAlchemy ORM definitions
+│   ├── data_manager.py             # In-memory domain object manager
+│   ├── structures.py               # Shared data structures
+│   └── unit_of_work.py             # Transaction boundary management
+├── domain/                         # Pure dataclasses — zero I/O, zero dependencies
 │   ├── worker_model.py
 │   ├── shift_model.py
 │   ├── task_model.py
-│   └── time_utils.py            # TimeWindow — canonical temporal primitive
-├── app/
-│   ├── core/config.py           # Pydantic Settings — all env vars, validation
-│   ├── db/session.py            # Engine creation, connection pooling
-│   └── main.py                  # FastAPI app, lifespan, middleware stack
-├── tests/                       # 460+ tests across 5 tiers
-│   ├── unit/                    # Pure logic tests (no DB, no I/O)
-│   ├── integration/             # Cross-module tests with real in-memory SQLite
-│   ├── e2e/                     # Full request -> solver -> response journeys
-│   ├── chaos/                   # Concurrency, rollback, corruption tests
-│   └── performance/             # Solver timeout, efficiency, volume tests
-├── render.yaml                  # Render.com deployment (API + DB + Redis)
-├── Dockerfile                   # Multi-stage, non-root, health check
-└── docker-compose.yml           # Local dev stack (FastAPI + PostgreSQL)
-```
-
----
-
-## Testing
-
-**460+ tests** across 5 tiers — with **zero business-logic mocking**:
-
-| Tier | Purpose | Mock Policy |
-|------|---------|-------------|
-| **Unit** | Pure domain logic, constraint math | Mock I/O boundaries only |
-| **Integration** | Cross-module flows, DB operations | Real in-memory SQLite — no repository mocks |
-| **Contract** | API schema validation, HTTP status codes | Real FastAPI test client |
-| **E2E** | Full request -> solver -> response | Real OR-Tools solver — **never mocked** |
-| **Chaos** | Concurrency, state corruption, race conditions | Real solver + real DB |
-
-### Infrastructure Swap Pattern
-
-E2E tests run the real solver but swap `ProcessPoolExecutor` for `ThreadPoolExecutor` to avoid subprocess overhead while keeping the full solver execution path:
-
-```python
-# tests/e2e/test_true_solve_journey.py
-solver_mod.SessionLocal = test_session_factory
-solver_mod.get_executor = lambda: ThreadPoolExecutor(max_workers=1)
-# Real OR-Tools solver runs in-thread with test database
-```
-
-### Running Tests
-
-```bash
-# Full suite (460+ tests)
-pytest
-
-# Fast feedback (unit + integration only)
-pytest -m "unit or integration" -x -q
-
-# With coverage
-pytest --cov=. --cov-report=term-missing
-
-# Specific tiers
-pytest -m e2e         # End-to-end journeys
-pytest -m chaos       # Concurrency and corruption
-pytest -m performance # Solver efficiency
+│   └── time_utils.py               # TimeWindow — canonical temporal primitive
+├── repositories/                   # DB access layer + canonical week normalization
+│   ├── interfaces.py               # Protocol ABCs (IWorkerRepository, IDataManager)
+│   ├── base.py                     # BaseRepository with shared CRUD logic
+│   ├── sql_worker_repo.py
+│   ├── sql_shift_repo.py
+│   ├── sql_repo.py                 # Aggregate repository (worker + shift access)
+│   ├── memory_repo.py              # In-memory fallback (test support)
+│   └── _session_guard.py           # Multi-tenancy FK enforcement
+├── services/                       # Business logic orchestration
+│   ├── solver_service.py           # Async job lifecycle + ProcessPoolExecutor
+│   ├── solver_job_store.py         # PENDING → RUNNING → COMPLETED state machine
+│   ├── diagnostic_service.py       # Async infeasibility diagnosis orchestration
+│   ├── session_adapter.py          # Cross-process domain snapshot adapter
+│   ├── excel_service.py            # Facade over the excel/ sub-package
+│   └── excel/                      # Excel import/export pipeline
+│       ├── importer.py             # Workbook → domain objects
+│       ├── exporter.py             # Solver results → workbook
+│       ├── state_exporter.py       # Full application state → workbook
+│       ├── constraint_mapper.py    # Excel constraints → API schema
+│       └── workbook_validator.py   # Structural validation
+├── solver/                         # MILP engine (OR-Tools pywraplp)
+│   ├── solver_engine.py            # MILP formulation, solve loop, result extraction
+│   ├── variable_builder.py         # Y/X variable construction + secondary indexes
+│   ├── diagnostics_engine.py       # 4-stage infeasibility diagnosis
+│   └── constraints/
+│       ├── definitions.py          # ← SINGLE SOURCE OF TRUTH (registry + OCP)
+│       ├── base.py                 # IConstraint protocol + SolverContext
+│       ├── config.py               # Pydantic config models per constraint
+│       ├── registry.py             # ConstraintRegistry (2-phase: hard then soft)
+│       ├── static_hard.py          # Coverage, exclusivity, overlap prevention
+│       ├── static_soft.py          # Max hours, preferences, consecutive shifts
+│       └── dynamic.py              # Mutual exclusion, co-location
+├── tests/                          # Test suite (unit, integration, E2E, chaos)
+├── frontend/                       # React 19 + Vite 7 + Tailwind CSS
+│   ├── src/
+│   │   ├── api/                    # HTTP client + endpoint definitions
+│   │   ├── components/             # UI components (common, modals, tabs, constraints)
+│   │   ├── help/                   # Guided tour engine + contextual help system
+│   │   ├── hooks/                  # Custom React hooks (poller, CRUD, solver lifecycle)
+│   │   └── utils/                  # Display formatting, constants
+│   ├── Dockerfile                  # Frontend container (nginx-based)
+│   └── nginx.conf                  # SPA rewrite rules + static asset serving
+├── Caddyfile                       # Reverse proxy configuration
+├── render.yaml                     # Render.com deployment (API + DB + Redis)
+├── Dockerfile                      # Multi-stage, non-root, health check
+└── docker-compose.yml              # Local dev stack (FastAPI + PostgreSQL)
 ```
 
 ---

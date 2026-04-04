@@ -2,10 +2,40 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes toast-progress {
+  from { width: 100%; }
+  to { width: 0%; }
+}
+
 .help-onboarding-highlight {
   position: relative;
-  z-index: 1;
+  z-index: 81;
   border-radius: 0.75rem;
   box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.75), 0 10px 24px rgba(79, 70, 229, 0.35);
   transition: box-shadow 0.2s ease-in-out;
+  pointer-events: auto;
+}
+
+/* Tour overlay — semi-transparent backdrop */
+.tour-overlay {
+  transition: opacity 0.25s ease-in-out;
+}
+
+/* Tour card — floating tooltip */
+.tour-card {
+  animation: tour-card-enter 0.25s ease-out;
+}
+
+@keyframes tour-card-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Tour card arrow */
+.tour-card-arrow {
+  width: 12px;
+  height: 12px;
+  background: white;
+  border: 2px solid rgb(199 210 254);
+  transform: rotate(45deg);
 }

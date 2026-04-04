@@ -2,7 +2,7 @@
 // ADD WORKER MODAL - With Skill Normalization
 // ========================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Plus, Trash2 } from 'lucide-react';
 import Modal from '../common/Modal';
 
@@ -19,30 +19,41 @@ const normalizeSkillName = (name) => {
         .join(' ');
 };
 
+const getInitialWorkerFormState = (initialData = null) => {
+    if (!initialData) {
+        return {
+            name: '',
+            skills: {},
+            availability: {},
+        };
+    }
+
+    const parsedSkills = initialData?.attributes?.skills || {};
+    const parsedAvailability = initialData?.attributes?.availability || {};
+
+    return {
+        name: initialData.name || '',
+        skills: typeof parsedSkills === 'object' ? parsedSkills : {},
+        availability: typeof parsedAvailability === 'object' ? parsedAvailability : {},
+    };
+};
+
 const AddWorkerModal = ({ isOpen, onClose, onAdd, initialData = null }) => {
-    const [name, setName] = useState('');
-    const [skills, setSkills] = useState({});
-    const [availability, setAvailability] = useState({});
+    const initialFormState = getInitialWorkerFormState(initialData);
+    const [name, setName] = useState(initialFormState.name);
+    const [skills, setSkills] = useState(initialFormState.skills);
+    const [availability, setAvailability] = useState(initialFormState.availability);
     const [newSkillName, setNewSkillName] = useState('');
     const [newSkillLevel, setNewSkillLevel] = useState(5);
 
-    // Parse initialData for Edit Mode
+    /* eslint-disable react-hooks/set-state-in-effect */
     useEffect(() => {
-        if (initialData) {
-            setName(initialData.name || '');
-            // Parse skills from attributes
-            const parsedSkills = initialData?.attributes?.skills || {};
-            setSkills(typeof parsedSkills === 'object' ? parsedSkills : {});
-            // Parse availability
-            const parsedAvail = initialData?.attributes?.availability || {};
-            setAvailability(typeof parsedAvail === 'object' ? parsedAvail : {});
-        } else {
-            // Reset for Add Mode
-            setName('');
-            setSkills({});
-            setAvailability({});
-        }
+        const nextFormState = getInitialWorkerFormState(initialData);
+        setName(nextFormState.name);
+        setSkills(nextFormState.skills);
+        setAvailability(nextFormState.availability);
     }, [initialData, isOpen]);
+    /* eslint-enable react-hooks/set-state-in-effect */
 
     const handleAddSkill = () => {
         if (!newSkillName.trim()) return;
@@ -88,7 +99,7 @@ const AddWorkerModal = ({ isOpen, onClose, onAdd, initialData = null }) => {
         };
 
         try {
-            const result = await onAdd(payload, initialData?.worker_id);
+            await onAdd(payload, initialData?.worker_id);
 
             // Reset form
             setName('');

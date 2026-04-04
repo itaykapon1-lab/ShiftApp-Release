@@ -29,10 +29,10 @@ def upgrade() -> None:
         op.execute(
             text(
                 f"INSERT INTO session_configs (session_id, constraints, created_at, updated_at) "
-                f"SELECT DISTINCT t.session_id, '[]', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP "
-                f"FROM {table} t "
+                f"SELECT t.session_id, :empty_constraints, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP "
+                f"FROM (SELECT DISTINCT session_id FROM {table}) t "
                 f"WHERE t.session_id NOT IN (SELECT session_id FROM session_configs)"
-            )
+            ).bindparams(sa.bindparam("empty_constraints", value=[], type_=sa.JSON()))
         )
 
     # Step 2: Add FK constraints via batch operations (required for SQLite).

@@ -250,7 +250,7 @@ const ConstraintsTab = ({ constraints: propConstraints, onConstraintsReplace, wo
             setErrorMapByInstanceId({});
             setSaveStateByInstanceId({});
             if (onRefresh) onRefresh();
-        } catch (err) {
+        } catch {
             if (mountedRef.current) {
                 setError('Failed to refresh constraints');
             }

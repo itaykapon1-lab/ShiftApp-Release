@@ -3,9 +3,10 @@
 // Now with OPT-IN diagnostics support
 // ========================================
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { AlertCircle, AlertTriangle, CheckCircle, XCircle, Info, Search, Loader2 } from 'lucide-react';
 import { runDiagnostics, getJobStatus } from '../api/endpoints';
+import { formatDiagnosticMessage } from '../utils/displayFormatting';
 
 /**
  * SolverDiagnostics Component
@@ -24,12 +25,20 @@ import { runDiagnostics, getJobStatus } from '../api/endpoints';
  * - jobId: The job ID for triggering diagnostics
  * - onDiagnosisComplete: Optional callback when diagnosis is fetched
  */
-const SolverDiagnostics = ({ result, jobId, onDiagnosisComplete }) => {
+const SolverDiagnostics = ({ result, jobId, onDiagnosisComplete, workers = [] }) => {
     const [diagnosis, setDiagnosis] = useState(result?.diagnosis_message || null);
     const [diagnosisStatus, setDiagnosisStatus] = useState(result?.diagnosis_status || null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState(null);
     const isMountedRef = useRef(true);
+    const formattedDiagnosis = useMemo(
+        () => formatDiagnosticMessage(diagnosis, workers),
+        [diagnosis, workers]
+    );
+    const formattedError = useMemo(
+        () => formatDiagnosticMessage(error, workers),
+        [error, workers]
+    );
 
     useEffect(() => {
         setDiagnosis(result?.diagnosis_message || null);
@@ -48,7 +57,6 @@ const SolverDiagnostics = ({ result, jobId, onDiagnosisComplete }) => {
     }
 
     const isInfeasible = result.result_status === 'Infeasible';
-    const isFeasible = result.result_status === 'Feasible';
 
     // Calculate efficiency percentage if we have both scores
     const efficiency = (result.theoretical_max_score && result.objective_value)
@@ -113,7 +121,7 @@ const SolverDiagnostics = ({ result, jobId, onDiagnosisComplete }) => {
         }
     };
 
-    const showCompletedDiagnosis = diagnosisStatus === 'COMPLETED' && Boolean(diagnosis);
+    const showPersistedDiagnosis = Boolean(diagnosis) && diagnosisStatus !== 'PENDING' && diagnosisStatus !== 'RUNNING';
     const showLoadingState = isLoading || diagnosisStatus === 'PENDING' || diagnosisStatus === 'RUNNING';
     const showRetryButton = diagnosisStatus === null || diagnosisStatus === 'FAILED';
 
@@ -147,10 +155,26 @@ const SolverDiagnostics = ({ result, jobId, onDiagnosisComplete }) => {
                             <div className="flex-1">
                                 <h4 className="font-bold text-gray-800 mb-2">Diagnosis:</h4>
 
-                                {showCompletedDiagnosis ? (
-                                    <pre className="text-sm text-gray-700 whitespace-pre-wrap font-mono bg-gray-50 p-3 rounded-lg border">
-                                        {diagnosis}
-                                    </pre>
+                                {showPersistedDiagnosis ? (
+                                    <div className="space-y-3">
+                                        <pre className="text-sm text-gray-700 whitespace-pre-wrap font-mono bg-gray-50 p-3 rounded-lg border">
+                                            {formattedDiagnosis}
+                                        </pre>
+
+                                        {showRetryButton && (
+                                            <button
+                                                onClick={handleRunDiagnostics}
+                                                disabled={isLoading}
+                                                className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-white transition-all ${isLoading
+                                                        ? 'bg-gray-400 cursor-not-allowed'
+                                                        : 'bg-blue-600 hover:bg-blue-700 hover:scale-105'
+                                                    }`}
+                                            >
+                                                <Search className="w-5 h-5" />
+                                                {diagnosisStatus === 'FAILED' ? 'Retry Diagnostics' : 'Run Diagnostics'}
+                                            </button>
+                                        )}
+                                    </div>
                                 ) : (
                                     <div className="space-y-3">
                                         {showRetryButton && (
@@ -162,7 +186,7 @@ const SolverDiagnostics = ({ result, jobId, onDiagnosisComplete }) => {
 
                                         {error && (
                                             <div className="text-sm text-red-600 bg-red-50 p-2 rounded border border-red-200">
-                                                {error}
+                                                {formattedError}
                                             </div>
                                         )}
 
@@ -209,7 +233,7 @@ const SolverDiagnostics = ({ result, jobId, onDiagnosisComplete }) => {
                                                 <span className="text-gray-600 ml-1">
                                                     {typeof details === 'object'
                                                         ? `${Array.isArray(details) ? details.length : 1} occurrence(s)`
-                                                        : String(details)
+                                                        : formatDiagnosticMessage(String(details), workers)
                                                     }
                                                 </span>
                                             </div>

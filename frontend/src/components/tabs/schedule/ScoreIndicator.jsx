@@ -3,6 +3,7 @@
 // ========================================
 
 import React, { useState } from 'react';
+import { formatDiagnosticMessage } from '../../../utils/displayFormatting';
 
 /**
  * ScoreIndicator Component
@@ -19,7 +20,7 @@ import React, { useState } from 'react';
  * - breakdown: String - optional breakdown explanation
  * - globalViolations: Array - optional global violations mapped to this assignment
  */
-const ScoreIndicator = ({ score, breakdown, globalViolations = [] }) => {
+const ScoreIndicator = ({ score, breakdown, globalViolations = [], employees = [] }) => {
     const [showTooltip, setShowTooltip] = useState(false);
 
     const normalizedGlobalViolations = Array.isArray(globalViolations)
@@ -58,12 +59,12 @@ const ScoreIndicator = ({ score, breakdown, globalViolations = [] }) => {
     const tooltipLines = [];
 
     if (breakdown && breakdown !== '-') {
-        tooltipLines.push(String(breakdown));
+        tooltipLines.push(formatDiagnosticMessage(String(breakdown), employees));
     }
 
     if (hasGlobalViolations) {
         normalizedGlobalViolations.forEach((description) => {
-            tooltipLines.push(`Global: ${description}`);
+            tooltipLines.push(`Global: ${formatDiagnosticMessage(description, employees)}`);
         });
     }
 

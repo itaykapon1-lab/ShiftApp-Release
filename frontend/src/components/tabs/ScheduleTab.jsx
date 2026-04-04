@@ -11,6 +11,8 @@ import {
     EFFICIENCY_THRESHOLD_GOOD,
     EFFICIENCY_THRESHOLD_WARNING,
 } from '../../utils/constants';
+import { formatDiagnosticMessage } from '../../utils/displayFormatting';
+import { mergeGlobalViolations } from './schedule/mergeGlobalViolations';
 
 const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -24,15 +26,6 @@ const DAY_ABBREV_MAP = {
     Fri: 'Friday',
     Sat: 'Saturday',
 };
-
-const normalizeToken = (value) => String(value ?? '').trim().toLowerCase();
-
-const toFiniteNumber = (value, fallback = 0) => {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : fallback;
-};
-
-const trimTrailingPunctuation = (value) => String(value ?? '').trim().replace(/[.,;:!?]+$/, '');
 
 /**
  * Extracts day name from various time string formats:
@@ -87,306 +80,12 @@ const extractTimeRange = (timeStr) => {
     return timeStr;
 };
 
-const buildWorkerLookup = (assignments, workers) => {
-    const idToName = new Map();
-    const nameToId = new Map();
-
-    const register = (workerId, workerName) => {
-        const idKey = normalizeToken(workerId);
-        const nameKey = normalizeToken(workerName);
-
-        if (idKey && nameKey) {
-            if (!idToName.has(idKey)) {
-                idToName.set(idKey, nameKey);
-            }
-            if (!nameToId.has(nameKey)) {
-                nameToId.set(nameKey, idKey);
-            }
-        }
-    };
-
-    workers.forEach((worker) => register(worker?.worker_id, worker?.name));
-    assignments.forEach((assign) => register(assign?.worker_id, assign?.worker_name));
-
-    return { idToName, nameToId };
-};
-
-const resolveWorkerTokens = (workerToken, workerLookup) => {
-    const normalized = normalizeToken(workerToken);
-    if (!normalized) {
-        return new Set();
-    }
-
-    const tokens = new Set([normalized]);
-
-    const mappedName = workerLookup.idToName.get(normalized);
-    if (mappedName) {
-        tokens.add(mappedName);
-    }
-
-    const mappedId = workerLookup.nameToId.get(normalized);
-    if (mappedId) {
-        tokens.add(mappedId);
-    }
-
-    return tokens;
-};
-
-const extractViolationHints = (description, metadata = {}) => {
-    const text = String(description ?? '').trim();
-    const safeMetadata = metadata && typeof metadata === 'object' ? metadata : {};
-
-    const metadataWorkerTokens = [];
-    if (Array.isArray(safeMetadata.worker_ids)) {
-        metadataWorkerTokens.push(...safeMetadata.worker_ids);
-    }
-    if (Array.isArray(safeMetadata.worker_names)) {
-        metadataWorkerTokens.push(...safeMetadata.worker_names);
-    }
-    ['primary_worker_id', 'primary_worker_name', 'paired_worker_id', 'paired_worker_name'].forEach((key) => {
-        if (safeMetadata[key]) {
-            metadataWorkerTokens.push(safeMetadata[key]);
-        }
-    });
-
-    const metadataShiftIdHints = [];
-    if (safeMetadata.shift_id) {
-        metadataShiftIdHints.push(normalizeToken(safeMetadata.shift_id));
-    }
-
-    const metadataShiftNameHint = safeMetadata.shift_name
-        ? trimTrailingPunctuation(safeMetadata.shift_name)
-        : '';
-
-    const unwantedShiftMatch = text.match(/Worker\s+(.+?)\s+assigned to unwanted shift\s+(.+)$/i);
-    if (unwantedShiftMatch) {
-        return {
-            workerToken: trimTrailingPunctuation(unwantedShiftMatch[1]),
-            workerTokens: metadataWorkerTokens,
-            shiftNameHint: trimTrailingPunctuation(unwantedShiftMatch[2]),
-            shiftIdHints: metadataShiftIdHints,
-        };
-    }
-
-    const restMatch = text.match(/Worker\s+(.+?)\s+has insufficient rest/i);
-    const workerFromRest = restMatch ? trimTrailingPunctuation(restMatch[1]) : '';
-
-    const hoursMatch = text.match(/Worker\s+(.+?)\s+exceeded limit/i);
-    const workerFromHours = hoursMatch ? trimTrailingPunctuation(hoursMatch[1]) : '';
-
-    const shiftPairMatch = text.match(/between shifts\s+([^\s]+)\s+and\s+([^\s.]+)\.?/i);
-    const shiftIdHints = shiftPairMatch
-        ? [trimTrailingPunctuation(shiftPairMatch[1]), trimTrailingPunctuation(shiftPairMatch[2])]
-              .map(normalizeToken)
-              .filter(Boolean)
-        : [];
-
-    const pairShiftMatch = text.match(/in shift\s+(.+?)\.?$/i);
-    const shiftNameHintFromText = pairShiftMatch
-        ? trimTrailingPunctuation(pairShiftMatch[1])
-        : '';
-
-    const pairWorkersTogetherMatch = text.match(
-        /Worker\s+(.+?)\s+and\s+Worker\s+(.+?)\s+were assigned together in shift\s+(.+?)\.?$/i
-    );
-    if (pairWorkersTogetherMatch) {
-        return {
-            workerToken: '',
-            workerTokens: [
-                ...metadataWorkerTokens,
-                trimTrailingPunctuation(pairWorkersTogetherMatch[1]),
-                trimTrailingPunctuation(pairWorkersTogetherMatch[2]),
-            ],
-            shiftNameHint: trimTrailingPunctuation(pairWorkersTogetherMatch[3]) || metadataShiftNameHint,
-            shiftIdHints: metadataShiftIdHints,
-        };
-    }
-
-    const pairMissingMatch = text.match(
-        /Worker\s+(.+?)\s+worked without required pair Worker\s+(.+?)\s+in shift\s+(.+?)\.?$/i
-    );
-    if (pairMissingMatch) {
-        return {
-            workerToken: trimTrailingPunctuation(pairMissingMatch[1]),
-            workerTokens: [
-                ...metadataWorkerTokens,
-                trimTrailingPunctuation(pairMissingMatch[1]),
-                trimTrailingPunctuation(pairMissingMatch[2]),
-            ],
-            shiftNameHint: trimTrailingPunctuation(pairMissingMatch[3]) || metadataShiftNameHint,
-            shiftIdHints: metadataShiftIdHints,
-        };
-    }
-
-    return {
-        workerToken: workerFromRest || workerFromHours,
-        workerTokens: metadataWorkerTokens,
-        shiftNameHint: metadataShiftNameHint || shiftNameHintFromText,
-        shiftIdHints: [...metadataShiftIdHints, ...shiftIdHints].filter(Boolean),
-    };
-};
-
-/**
- * Client-side violation injection.
- *
- * Enriches assignments with global_violations by parsing penaltyBreakdown metadata.
- * This bridges the gap between global penalties and per-card visualization.
- */
-export const mergeGlobalViolations = (assignments = [], penaltyBreakdown = {}, workers = []) => {
-    const clonedAssignments = assignments.map((assign) => ({
-        ...assign,
-        global_violations: [],
-        global_penalty_total: 0,
-    }));
-
-    if (!penaltyBreakdown || Object.keys(penaltyBreakdown).length === 0) {
-        return clonedAssignments;
-    }
-
-    const workerLookup = buildWorkerLookup(clonedAssignments, workers);
-
-    const findAssignmentIndexes = ({ workerTokens, shiftIdHints, shiftNameHint }) => {
-        const normalizedShiftNameHint = normalizeToken(shiftNameHint);
-
-        const directMatches = [];
-
-        clonedAssignments.forEach((assign, idx) => {
-            const assignWorkerId = normalizeToken(assign.worker_id);
-            const assignWorkerName = normalizeToken(assign.worker_name);
-            const assignShiftId = normalizeToken(assign.shift_id);
-            const assignShiftName = normalizeToken(assign.shift_name);
-
-            const workerMatch = workerTokens.size === 0
-                ? true
-                : workerTokens.has(assignWorkerId) || workerTokens.has(assignWorkerName);
-
-            const hasShiftHints = shiftIdHints.length > 0 || Boolean(normalizedShiftNameHint);
-            const shiftMatch = !hasShiftHints
-                ? true
-                : shiftIdHints.includes(assignShiftId) ||
-                  (normalizedShiftNameHint && normalizedShiftNameHint === assignShiftName);
-
-            if (workerMatch && shiftMatch) {
-                directMatches.push(idx);
-            }
-        });
-
-        if (directMatches.length > 0) {
-            return directMatches;
-        }
-
-        if (workerTokens.size > 0) {
-            const workerFallback = [];
-            clonedAssignments.forEach((assign, idx) => {
-                const assignWorkerId = normalizeToken(assign.worker_id);
-                const assignWorkerName = normalizeToken(assign.worker_name);
-                if (workerTokens.has(assignWorkerId) || workerTokens.has(assignWorkerName)) {
-                    workerFallback.push(idx);
-                }
-            });
-            if (workerFallback.length > 0) {
-                return workerFallback;
-            }
-        }
-
-        if (shiftIdHints.length > 0 || normalizedShiftNameHint) {
-            const shiftFallback = [];
-            clonedAssignments.forEach((assign, idx) => {
-                const assignShiftId = normalizeToken(assign.shift_id);
-                const assignShiftName = normalizeToken(assign.shift_name);
-                if (shiftIdHints.includes(assignShiftId) || (normalizedShiftNameHint && normalizedShiftNameHint === assignShiftName)) {
-                    shiftFallback.push(idx);
-                }
-            });
-            if (shiftFallback.length > 0) {
-                return shiftFallback;
-            }
-        }
-
-        return [];
-    };
-
-    Object.entries(penaltyBreakdown).forEach(([constraintName, data]) => {
-        const violations = Array.isArray(data?.violations) ? data.violations : [];
-
-        violations.forEach((rawViolation) => {
-            const violation = typeof rawViolation === 'string'
-                ? { description: rawViolation, penalty: data?.total_penalty }
-                : (rawViolation || {});
-
-            const description = String(violation.description || '').trim();
-            if (!description) {
-                return;
-            }
-
-            const hints = extractViolationHints(description, violation.metadata);
-            const workerTokens = new Set();
-
-            (Array.isArray(hints.workerTokens) ? hints.workerTokens : []).forEach((workerToken) => {
-                const resolved = resolveWorkerTokens(workerToken, workerLookup);
-                resolved.forEach((token) => workerTokens.add(token));
-            });
-
-            resolveWorkerTokens(hints.workerToken, workerLookup).forEach((token) => workerTokens.add(token));
-
-            const hasMatchingHints = workerTokens.size > 0
-                || (Array.isArray(hints.shiftIdHints) && hints.shiftIdHints.length > 0)
-                || Boolean(hints.shiftNameHint);
-
-            if (!hasMatchingHints) {
-                return;
-            }
-
-            const targetIndexes = findAssignmentIndexes({
-                workerTokens,
-                shiftIdHints: hints.shiftIdHints,
-                shiftNameHint: hints.shiftNameHint,
-            });
-
-            if (targetIndexes.length === 0) {
-                return;
-            }
-
-            const normalizedViolation = {
-                constraint: constraintName,
-                description,
-                penalty: toFiniteNumber(violation.penalty, toFiniteNumber(data?.total_penalty, 0)),
-                observed_value: violation.observed_value,
-                limit_value: violation.limit_value,
-                metadata: violation.metadata,
-            };
-
-            const violationDedupKey = `${constraintName}|${description}|${normalizedViolation.penalty}`;
-
-            targetIndexes.forEach((idx) => {
-                const assign = clonedAssignments[idx];
-                const alreadyExists = assign.global_violations.some((item) => (
-                    `${item.constraint}|${item.description}|${item.penalty}` === violationDedupKey
-                ));
-
-                if (!alreadyExists) {
-                    assign.global_violations.push(normalizedViolation);
-                }
-            });
-        });
-    });
-
-    clonedAssignments.forEach((assign) => {
-        assign.global_penalty_total = assign.global_violations.reduce(
-            (sum, violation) => sum + toFiniteNumber(violation?.penalty, 0),
-            0
-        );
-    });
-
-    return clonedAssignments;
-};
-
 /**
  * ScoreBreakdownPanel Component
  *
  * Displays a breakdown of penalties by constraint type for score explainability.
  */
-const ScoreBreakdownPanel = ({ penaltyBreakdown }) => {
+const ScoreBreakdownPanel = ({ penaltyBreakdown, workers = EMPTY_WORKERS }) => {
     if (!penaltyBreakdown || Object.keys(penaltyBreakdown).length === 0) {
         return null;
     }
@@ -415,8 +114,8 @@ const ScoreBreakdownPanel = ({ penaltyBreakdown }) => {
                 </p>
             </div>
 
-            <div className="p-4">
-                <table className="w-full">
+            <div className="p-4 overflow-x-auto">
+                <table className="w-full min-w-[480px]">
                     <thead>
                         <tr className="text-left text-sm text-gray-500 border-b">
                             <th className="pb-2 font-semibold">Constraint</th>
@@ -435,8 +134,8 @@ const ScoreBreakdownPanel = ({ penaltyBreakdown }) => {
                                         {entry.name.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase())}
                                     </div>
                                     {entry.violations.length > 0 && entry.violations[0]?.description && (
-                                        <div className="text-xs text-gray-500 mt-0.5 truncate max-w-xs">
-                                            e.g., {entry.violations[0].description}
+                                        <div className="text-xs text-gray-500 mt-0.5 truncate max-w-[150px] sm:max-w-xs">
+                                            e.g., {formatDiagnosticMessage(entry.violations[0].description, workers)}
                                         </div>
                                     )}
                                 </td>
@@ -615,9 +314,9 @@ const ScheduleTab = ({ assignments = EMPTY_ASSIGNMENTS, objectiveValue, theoreti
     return (
         <div className="space-y-6">
             {/* Header Stats */}
-            <div className="flex flex-wrap gap-4 items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:gap-4 sm:items-center sm:justify-between">
                 <div>
-                    <h2 className="text-2xl font-black text-gray-800 flex items-center gap-2">
+                    <h2 className="text-xl sm:text-2xl font-black text-gray-800 flex items-center gap-2">
                         <Calendar className="w-7 h-7 text-indigo-600" />
                         Weekly Schedule
                     </h2>
@@ -630,13 +329,13 @@ const ScheduleTab = ({ assignments = EMPTY_ASSIGNMENTS, objectiveValue, theoreti
                     <HelpButton topicId="schedule.interpretation" label="Help" />
                     {/* Score Summary */}
                     {objectiveValue !== undefined && (
-                        <div className="flex items-center gap-4 bg-gradient-to-r from-indigo-50 to-purple-50 px-5 py-3 rounded-xl border-2 border-indigo-200">
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 bg-gradient-to-r from-indigo-50 to-purple-50 px-3 py-2 sm:px-5 sm:py-3 rounded-xl border-2 border-indigo-200">
                             <div className="text-right">
                                 <div className="text-sm text-gray-600 font-medium flex items-center justify-end gap-1">
                                     Total Score
                                     <HelpPopover hintId="objective_score" />
                                 </div>
-                                <div className="text-2xl font-black text-indigo-700">
+                                <div className="text-lg sm:text-2xl font-black text-indigo-700">
                                     {objectiveValue?.toFixed(1) || '0.0'}
                                 </div>
                             </div>
@@ -648,7 +347,7 @@ const ScheduleTab = ({ assignments = EMPTY_ASSIGNMENTS, objectiveValue, theoreti
                                             Efficiency
                                             <HelpPopover hintId="efficiency_ratio" placement="left" />
                                         </div>
-                                        <div className={`text-2xl font-black ${
+                                        <div className={`text-lg sm:text-2xl font-black ${
                                             parseFloat(efficiency) >= EFFICIENCY_THRESHOLD_GOOD ? 'text-green-600' :
                                                 parseFloat(efficiency) >= EFFICIENCY_THRESHOLD_WARNING ? 'text-yellow-600' : 'text-red-600'
                                         }`}>
@@ -683,11 +382,11 @@ const ScheduleTab = ({ assignments = EMPTY_ASSIGNMENTS, objectiveValue, theoreti
 
             {/* Score Breakdown Panel (Explainability) */}
             {penaltyBreakdown && Object.keys(penaltyBreakdown).length > 0 && (
-                <ScoreBreakdownPanel penaltyBreakdown={penaltyBreakdown} />
+                <ScoreBreakdownPanel penaltyBreakdown={penaltyBreakdown} workers={workers} />
             )}
 
             {/* Week Grid */}
-            <WeekGrid assignmentsByDay={assignmentsByDay} onShiftClick={handleShiftClick} />
+            <WeekGrid assignmentsByDay={assignmentsByDay} onShiftClick={handleShiftClick} workers={workers} />
 
             {/* Shift Details Modal */}
             <ShiftDetailsModal

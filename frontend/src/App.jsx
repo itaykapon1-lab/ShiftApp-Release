@@ -25,7 +25,7 @@ import AddWorkerModal from './components/modals/AddWorkerModal';
 import AddShiftModal from './components/modals/AddShiftModal';
 import SolverDiagnostics from './components/SolverDiagnostics';
 import ScheduleTab from './components/tabs/ScheduleTab';
-import { HelpButton } from './help';
+import { HelpButton, HelpProvider, RestartTourButton } from './help';
 
 import ToastNotification from './components/common/ToastNotification';
 
@@ -48,6 +48,8 @@ function App() {
   const fetchDataRef = useRef(null);
   const startPollingRef = useRef(null);
   const stopPollingRef = useRef(null);
+  const diagnosticsSectionRef = useRef(null);
+  const tourBridgeRef = useRef({});
 
   // ── Toast helpers (stable — [] deps) ──
   const showToast = useCallback((type, message, detail = null, options = {}) => {
@@ -64,6 +66,10 @@ function App() {
 
   const dismissToast = useCallback(() => {
     setToast(null);
+  }, []);
+
+  const scrollToDiagnostics = useCallback(() => {
+    diagnosticsSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
 
   const formatImportIssue = useCallback((issue) => {
@@ -92,7 +98,7 @@ function App() {
     workersCRUD.setWorkers([]);
     shiftsCRUD.setShifts([]);
     setConstraints([]);
-  }, [workersCRUD.setWorkers, shiftsCRUD.setShifts]);
+  }, [workersCRUD, shiftsCRUD]);
 
   const getDataCounts = useCallback(() => ({
     workers: workersCRUD.workers.length,
@@ -106,7 +112,7 @@ function App() {
   });
 
   // ── Job polling (receives callbacks from solver hook) ──
-  const { jobId, jobStatus, isPolling, startPolling, stopPolling } = useJobPoller(
+  const { jobStatus, isPolling, startPolling, stopPolling } = useJobPoller(
     solver.handleJobComplete,
     solver.handleJobFail
   );
@@ -236,27 +242,44 @@ function App() {
   };
 
   // ========================================
+  // TOUR BRIDGE — exposes App state to the guided tour without logic changes
+  // ========================================
+  tourBridgeRef.current = {
+    setActiveTab,
+    activeTab,
+    isWorkerModalOpen: workersCRUD.isAddWorkerModalOpen,
+    isShiftModalOpen: shiftsCRUD.isAddShiftModalOpen,
+    workersCount: workersCRUD.workers.length,
+    shiftsCount: shiftsCRUD.shifts.length,
+    isPolling,
+    solverResult: solver.solverResult,
+  };
+
+  // ========================================
   // RENDER
   // ========================================
 
+  const showDiagnosticsShortcut = solver.solverResult?.result_status === 'Infeasible';
+
   return (
+    <HelpProvider tourBridgeRef={tourBridgeRef}>
     <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50 to-purple-50">
       {/* Toast Notification (floating top-right) */}
       <ToastNotification toast={toast} onDismiss={dismissToast} />
 
       {/* Header */}
       <header className="bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 text-white shadow-2xl">
-        <div className="container mx-auto px-6 py-5 flex justify-between items-center">
+        <div className="container mx-auto px-3 py-3 sm:px-6 sm:py-5 flex justify-between items-center">
           <div className="flex items-center gap-3">
             <RefreshCw className={`w-7 h-7 ${isRefreshing ? 'animate-spin' : ''}`} />
             <div>
-              <h1 className="text-3xl font-black tracking-tight">Shift Optimizer Pro</h1>
-              <p className="text-xs text-purple-200">Advanced Scheduling System</p>
+              <h1 className="text-xl sm:text-2xl md:text-3xl font-black tracking-tight">Shift Optimizer Pro</h1>
+              <p className="text-[10px] sm:text-xs text-purple-200">Advanced Scheduling System</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
             {isPolling && (
-              <div className="flex items-center px-5 py-2 bg-white bg-opacity-20 rounded-full backdrop-blur-sm shadow-lg">
+              <div className="flex items-center px-3 py-1.5 sm:px-5 sm:py-2 bg-white bg-opacity-20 rounded-full backdrop-blur-sm shadow-lg text-sm sm:text-base">
                 <Clock className="w-5 h-5 mr-2 animate-spin" />
                 <span className="font-bold">{jobStatus || 'PROCESSING'}</span>
               </div>
@@ -265,7 +288,7 @@ function App() {
         </div>
       </header>
 
-      <main className="container mx-auto px-6 py-8">
+      <main className="container mx-auto px-3 py-4 sm:px-6 sm:py-8">
         {/* Persistent Info Bar (data counts — not a toast) */}
         {status && (
           <div id="status-bar" className={`mb-6 px-5 py-3 rounded-xl flex items-center gap-3 text-sm font-medium transition-all ${status.type === 'info'
@@ -283,11 +306,34 @@ function App() {
           </div>
         )}
 
+        {showDiagnosticsShortcut && (
+          <div className="mb-6 rounded-2xl border-2 border-red-200 bg-red-50 px-5 py-4 shadow-sm">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-600" />
+                <div>
+                  <h2 className="text-base font-black text-red-900">No solution found</h2>
+                  <p className="text-sm text-red-700">
+                    Open diagnostics to see which hard constraint blocked the schedule.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={scrollToDiagnostics}
+                className="inline-flex items-center justify-center rounded-xl bg-red-600 px-4 py-2 text-sm font-bold text-white shadow-md transition-all hover:bg-red-700 hover:scale-[1.02]"
+              >
+                Open Diagnostics
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Action Bar */}
-        <div className="bg-white p-6 rounded-2xl shadow-2xl mb-8 border-2 border-gray-200">
-          <div className="flex flex-wrap gap-4 justify-between items-center">
+        <div className="bg-white p-3 sm:p-6 rounded-2xl shadow-2xl mb-4 sm:mb-8 border-2 border-gray-200">
+          <div className="flex flex-wrap gap-2 sm:gap-4 justify-between items-center">
             <div className="flex gap-3 flex-wrap">
-              <label className="flex items-center px-5 py-3 bg-gradient-to-r from-indigo-100 to-purple-100 border-3 border-indigo-300 rounded-xl cursor-pointer hover:from-indigo-200 hover:to-purple-200 transition-all font-bold text-indigo-800 shadow-md hover:shadow-lg">
+              <label className="flex items-center px-3 py-2 sm:px-5 sm:py-3 bg-gradient-to-r from-indigo-100 to-purple-100 border-3 border-indigo-300 rounded-xl cursor-pointer hover:from-indigo-200 hover:to-purple-200 transition-all font-bold text-sm sm:text-base text-indigo-800 shadow-md hover:shadow-lg">
                 <Upload className="w-5 h-5 mr-2" />
                 Import Excel
                 <input
@@ -303,7 +349,7 @@ function App() {
                 id="btn-export-result"
                 onClick={solver.handleExport}
                 disabled={shiftsCRUD.shifts.length === 0}
-                className="flex items-center px-5 py-3 bg-gradient-to-r from-green-100 to-emerald-100 border-3 border-green-300 rounded-xl hover:from-green-200 hover:to-emerald-200 transition-all font-bold text-green-800 shadow-md hover:shadow-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex items-center px-3 py-2 sm:px-5 sm:py-3 bg-gradient-to-r from-green-100 to-emerald-100 border-3 border-green-300 rounded-xl hover:from-green-200 hover:to-emerald-200 transition-all font-bold text-sm sm:text-base text-green-800 shadow-md hover:shadow-lg disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Download className="w-5 h-5 mr-2" />
                 Export Result
@@ -312,19 +358,20 @@ function App() {
                 id="btn-export-state"
                 onClick={solver.handleExportState}
                 disabled={workersCRUD.workers.length === 0 && shiftsCRUD.shifts.length === 0}
-                className="flex items-center px-5 py-3 bg-gradient-to-r from-blue-100 to-cyan-100 border-3 border-blue-300 rounded-xl hover:from-blue-200 hover:to-cyan-200 transition-all font-bold text-blue-800 shadow-md hover:shadow-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex items-center px-3 py-2 sm:px-5 sm:py-3 bg-gradient-to-r from-blue-100 to-cyan-100 border-3 border-blue-300 rounded-xl hover:from-blue-200 hover:to-cyan-200 transition-all font-bold text-sm sm:text-base text-blue-800 shadow-md hover:shadow-lg disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 <Download className="w-5 h-5 mr-2" />
                 Export State
               </button>
               <HelpButton topicId="data.management" label="Data Help" variant="neutral" />
+              <RestartTourButton />
             </div>
             <div className="flex items-center gap-3">
               <button
                 id="btn-reset-data"
                 onClick={solver.handleResetSessionData}
                 disabled={workersCRUD.workers.length === 0 && shiftsCRUD.shifts.length === 0}
-                className="flex items-center px-4 py-3 bg-gradient-to-r from-red-100 to-rose-100 border-3 border-red-300 rounded-xl hover:from-red-200 hover:to-rose-200 transition-all font-bold text-red-800 shadow-md hover:shadow-lg disabled:opacity-40 disabled:cursor-not-allowed"
+                className="flex items-center px-3 py-2 sm:px-4 sm:py-3 bg-gradient-to-r from-red-100 to-rose-100 border-3 border-red-300 rounded-xl hover:from-red-200 hover:to-rose-200 transition-all font-bold text-sm sm:text-base text-red-800 shadow-md hover:shadow-lg disabled:opacity-40 disabled:cursor-not-allowed"
                 title="Delete all session data"
               >
                 <Trash2 className="w-5 h-5 mr-2" />
@@ -334,7 +381,7 @@ function App() {
                 id="btn-run-solver"
                 onClick={solver.handleSolve}
                 disabled={isPolling || solver.isSolveStarting || workersCRUD.workers.length === 0}
-                className={`flex items-center px-8 py-3 rounded-xl text-white font-black text-lg shadow-2xl transition-all hover:scale-105 ${(isPolling || solver.isSolveStarting || workersCRUD.workers.length === 0)
+                className={`flex items-center px-4 py-2.5 sm:px-8 sm:py-3 rounded-xl text-white font-black text-sm sm:text-lg shadow-2xl transition-all hover:scale-105 ${(isPolling || solver.isSolveStarting || workersCRUD.workers.length === 0)
                   ? 'bg-gray-400 cursor-not-allowed hover:scale-100'
                   : 'bg-gradient-to-r from-indigo-600 via-purple-600 to-pink-600 hover:from-indigo-700 hover:via-purple-700 hover:to-pink-700'
                   }`}
@@ -347,7 +394,7 @@ function App() {
         </div>
 
         {/* Main Content */}
-        <div className="bg-white rounded-3xl shadow-2xl border-2 border-gray-200 overflow-hidden min-h-[700px]">
+        <div className="bg-white rounded-2xl sm:rounded-3xl shadow-2xl border-2 border-gray-200 overflow-hidden min-h-[400px] sm:min-h-[700px]">
           {/* Tabs */}
           <div className="flex border-b-4 border-gray-200 bg-gradient-to-r from-gray-50 via-blue-50 to-purple-50">
             {[
@@ -360,18 +407,18 @@ function App() {
                 key={tab.id}
                 id={`tab-${tab.id}`}
                 onClick={() => setActiveTab(tab.id)}
-                className={`px-8 py-5 font-black text-lg border-b-4 transition-all ${activeTab === tab.id
+                className={`px-3 py-3 sm:px-8 sm:py-5 font-bold sm:font-black text-xs sm:text-lg border-b-4 transition-all ${activeTab === tab.id
                   ? 'border-indigo-600 text-indigo-700 bg-white shadow-lg'
                   : 'border-transparent text-gray-500 hover:bg-gray-100'
                   }`}
               >
-                {tab.label} <span className="ml-2 px-3 py-1 bg-indigo-600 text-white rounded-full text-sm">{tab.count}</span>
+                {tab.label} <span className="ml-1 sm:ml-2 px-2 py-0.5 sm:px-3 sm:py-1 bg-indigo-600 text-white rounded-full text-[10px] sm:text-sm">{tab.count}</span>
               </button>
             ))}
           </div>
 
           {/* Tab Content */}
-          <div className="p-8">
+          <div className="p-3 sm:p-6 md:p-8">
             {loading ? (
               <LoadingSpinner />
             ) : (
@@ -422,24 +469,33 @@ function App() {
 
         {/* Solver Diagnostics Panel */}
         {solver.solverResult && solver.solverResult.result_status !== 'Optimal' && (
-          <SolverDiagnostics result={solver.solverResult} jobId={solver.solverResult.job_id} />
+          <section ref={diagnosticsSectionRef} id="solver-diagnostics-section">
+            <SolverDiagnostics
+              result={solver.solverResult}
+              jobId={solver.solverResult.job_id}
+              workers={workersCRUD.workers}
+            />
+          </section>
         )}
       </main>
 
       {/* Modals */}
       <AddWorkerModal
+        key={workersCRUD.editingWorker?.worker_id || 'new-worker'}
         isOpen={workersCRUD.isAddWorkerModalOpen}
         onClose={workersCRUD.closeModal}
         onAdd={workersCRUD.handleAddWorker}
         initialData={workersCRUD.editingWorker}
       />
       <AddShiftModal
+        key={shiftsCRUD.editingShift?.shift_id || 'new-shift'}
         isOpen={shiftsCRUD.isAddShiftModalOpen}
         onClose={shiftsCRUD.closeModal}
         onAdd={shiftsCRUD.handleAddShift}
         initialData={shiftsCRUD.editingShift}
       />
     </div>
+    </HelpProvider>
   );
 }
 

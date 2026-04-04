@@ -2,9 +2,10 @@
 // ADD SHIFT MODAL - Advanced Task Builder
 // ========================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Plus, Trash2, X } from 'lucide-react';
 import Modal from '../common/Modal';
+import { getDisplayTaskName, isMeaninglessTaskName } from '../../utils/displayFormatting';
 
 // ========================================
 // DUMMY WEEK DATE MAPPING
@@ -23,11 +24,54 @@ const DAY_TO_DATE_MAP = {
     'Saturday': '2026-01-10',
 };
 
-// Reverse map: Get day name from a date string
-const dateToDayName = (dateStr) => {
-    if (!dateStr) return 'Monday';
-    const d = new Date(dateStr + 'T00:00:00');
-    return DAYS_OF_WEEK[d.getDay()];
+let nextTaskSequence = 0;
+
+const createTaskId = () => {
+    nextTaskSequence += 1;
+    return `task_${nextTaskSequence}`;
+};
+
+const createDefaultTask = (name = 'Main Task') => ({
+    task_id: createTaskId(),
+    name,
+    options: [{
+        preference_score: 0,
+        priority: 1,
+        requirements: [{
+            count: 1,
+            required_skills: {}
+        }]
+    }]
+});
+
+const getInitialShiftFormState = (initialData = null) => {
+    if (!initialData) {
+        return {
+            name: '',
+            day: 'Monday',
+            timeRange: '08:00-16:00',
+            originalDateStr: null,
+            tasks: [createDefaultTask()],
+        };
+    }
+
+    const tasksData = initialData?.tasks_data?.tasks || [];
+    const startDate = initialData.start_time ? new Date(initialData.start_time) : null;
+    const endDate = initialData.end_time ? new Date(initialData.end_time) : null;
+    const hasTimes = startDate && endDate;
+    const isoStr = initialData.start_time || '';
+
+    return {
+        name: initialData.name || '',
+        day: hasTimes ? DAYS_OF_WEEK[startDate.getDay()] : 'Monday',
+        timeRange: hasTimes
+            ? `${startDate.toTimeString().slice(0, 5)}-${endDate.toTimeString().slice(0, 5)}`
+            : '08:00-16:00',
+        originalDateStr: isoStr
+            ? (isoStr.includes('T') ? isoStr.split('T')[0] : isoStr.slice(0, 10))
+            : null,
+        tasks: tasksData.length > 0 ? tasksData : [createDefaultTask()],
+    };
 };
 
 /**
@@ -93,79 +137,32 @@ const SkillBuilder = ({ skills, onAddSkill, onRemoveSkill }) => {
  * Complex Task/Option/Requirement hierarchy builder
  */
 const AddShiftModal = ({ isOpen, onClose, onAdd, initialData = null }) => {
-    const [name, setName] = useState('');
-    const [day, setDay] = useState('Monday');
-    const [timeRange, setTimeRange] = useState('08:00-16:00');
+    const initialFormState = getInitialShiftFormState(initialData);
+    const [name, setName] = useState(initialFormState.name);
+    const [day, setDay] = useState(initialFormState.day);
+    const [timeRange, setTimeRange] = useState(initialFormState.timeRange);
 
     // DATE ANCHORING FIX: Preserve the original date from the DB when editing.
     // This prevents the DAY_TO_DATE_MAP from clobbering imported dates (e.g., Feb 16 → Jan 5)
-    const [originalDateStr, setOriginalDateStr] = useState(null); // e.g., "2026-02-16"
+    const [originalDateStr, setOriginalDateStr] = useState(initialFormState.originalDateStr); // e.g., "2026-02-16"
 
     // Advanced Structure: Tasks -> Options -> Requirements
-    const [tasks, setTasks] = useState([{
-        task_id: `task_${Date.now()}`,
-        name: 'Main Task',
-        options: [{
-            preference_score: 0,
-            priority: 1,
-            requirements: [{
-                count: 1,
-                required_skills: {}
-            }]
-        }]
-    }]);
+    const [tasks, setTasks] = useState(initialFormState.tasks);
 
-    // Parse initialData for Edit Mode
+    /* eslint-disable react-hooks/set-state-in-effect */
     useEffect(() => {
-        if (initialData) {
-            setName(initialData.name || '');
-
-            // Extract day and time from existing shift
-            if (initialData.start_time && initialData.end_time) {
-                const startDate = new Date(initialData.start_time);
-                const endDate = new Date(initialData.end_time);
-
-                // Extract TIME for display (HH:MM-HH:MM)
-                const start = startDate.toTimeString().slice(0, 5);
-                const end = endDate.toTimeString().slice(0, 5);
-                setTimeRange(`${start}-${end}`);
-
-                // Extract day name from the date for display
-                const dayName = DAYS_OF_WEEK[startDate.getDay()];
-                setDay(dayName);
-
-                // DATE ANCHORING FIX: Store the original date string (YYYY-MM-DD)
-                // from the actual DB value. This is the date that was imported from
-                // Excel or previously saved. We MUST preserve it on update.
-                // Extract date portion from the ISO string directly (avoid timezone shift)
-                const isoStr = initialData.start_time;
-                const anchored = isoStr.includes('T') ? isoStr.split('T')[0] : isoStr.slice(0, 10);
-                setOriginalDateStr(anchored);
-            }
-
-            // Parse tasks_data (CRITICAL: Complex nested structure)
-            const tasksData = initialData?.tasks_data?.tasks || [];
-            if (tasksData.length > 0) {
-                setTasks(tasksData);
-            }
-        } else {
-            // Reset for Add Mode
-            setName('');
-            setTimeRange('08:00-16:00');
-            setDay('Monday'); // Default to Monday for new shifts
-            setOriginalDateStr(null); // No anchor in create mode
-
-            setTasks([{
-                task_id: `task_${Date.now()}`,
-                name: 'Main Task',
-                options: [{ preference_score: 0, priority: 1, requirements: [{ count: 1, required_skills: {} }] }]
-            }]);
-        }
+        const nextFormState = getInitialShiftFormState(initialData);
+        setName(nextFormState.name);
+        setDay(nextFormState.day);
+        setTimeRange(nextFormState.timeRange);
+        setOriginalDateStr(nextFormState.originalDateStr);
+        setTasks(nextFormState.tasks);
     }, [initialData, isOpen]);
+    /* eslint-enable react-hooks/set-state-in-effect */
 
     const addTask = () => {
         setTasks(prev => [...prev, {
-            task_id: `task_${Date.now()}`,
+            task_id: createTaskId(),
             name: `Task ${prev.length + 1}`,
             options: [{
                 preference_score: 0,
@@ -275,7 +272,7 @@ const AddShiftModal = ({ isOpen, onClose, onAdd, initialData = null }) => {
                 const hasPriority1 = task.options.some(opt => (opt.priority || 1) === 1);
                 if (!hasPriority1) {
                     const proceed = confirm(
-                        `Task "${task.name}" has no option set to Priority #1 (most preferred). ` +
+                        `Task "${getDisplayTaskName(task, tasks.indexOf(task))}" has no option set to Priority #1 (most preferred). ` +
                         `The solver will penalize all options equally. Continue anyway?`
                     );
                     if (!proceed) return;
@@ -323,15 +320,11 @@ const AddShiftModal = ({ isOpen, onClose, onAdd, initialData = null }) => {
         };
 
         try {
-            const result = await onAdd(payload, initialData?.shift_id);
+            await onAdd(payload, initialData?.shift_id);
 
             // Reset
             setName('');
-            setTasks([{
-                task_id: `task_${Date.now()}`,
-                name: 'Main Task',
-                options: [{ preference_score: 0, priority: 1, requirements: [{ count: 1, required_skills: {} }] }]
-            }]);
+            setTasks([createDefaultTask()]);
             onClose();
         } catch (err) {
             console.error(initialData ? "❌ Failed to update shift:" : "❌ Failed to create shift:", err);
@@ -344,7 +337,7 @@ const AddShiftModal = ({ isOpen, onClose, onAdd, initialData = null }) => {
             <div className="space-y-6">
                 {/* Shift Details */}
                 <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-4 rounded-xl border-2 border-indigo-200">
-                    <h3 className="font-bold text-lg mb-3 text-indigo-900">📋 Shift Details</h3>
+                    <h3 className="font-bold text-base sm:text-lg mb-3 text-indigo-900">📋 Shift Details</h3>
                     <input
                         type="text"
                         value={name}
@@ -352,7 +345,7 @@ const AddShiftModal = ({ isOpen, onClose, onAdd, initialData = null }) => {
                         placeholder="Evening Service Shift"
                         className="w-full px-4 py-3 border-2 border-indigo-300 rounded-lg outline-none text-lg font-medium mb-3"
                     />
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {/* Day Dropdown - Primary Input */}
                         <div>
                             <label className="block text-sm font-bold mb-1 text-gray-700">📅 Day of Week</label>
@@ -384,7 +377,7 @@ const AddShiftModal = ({ isOpen, onClose, onAdd, initialData = null }) => {
                 {/* Tasks List */}
                 <div className="space-y-4">
                     <div className="flex justify-between items-center">
-                        <h3 className="font-bold text-lg text-gray-800">🎯 Tasks (What needs to be done)</h3>
+                        <h3 className="font-bold text-base sm:text-lg text-gray-800">🎯 Tasks (What needs to be done)</h3>
                         <button
                             onClick={addTask}
                             className="flex items-center px-3 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 font-bold text-sm"
@@ -400,9 +393,9 @@ const AddShiftModal = ({ isOpen, onClose, onAdd, initialData = null }) => {
                                 <span className="text-2xl">📦</span>
                                 <input
                                     type="text"
-                                    value={task.name}
+                                    value={isMeaninglessTaskName(task.name, task.task_id) ? '' : task.name}
                                     onChange={(e) => updateTaskName(taskIdx, e.target.value)}
-                                    placeholder="Task Name (e.g., Service Staff)"
+                                    placeholder={getDisplayTaskName(task, taskIdx)}
                                     className="flex-1 px-3 py-2 border-2 border-blue-400 rounded-lg font-bold"
                                 />
                                 <button
@@ -414,7 +407,7 @@ const AddShiftModal = ({ isOpen, onClose, onAdd, initialData = null }) => {
                             </div>
 
                             {/* Options (OR Logic) */}
-                            <div className="ml-8 space-y-3">
+                            <div className="ml-3 sm:ml-8 space-y-3">
                                 <div className="flex justify-between items-center">
                                     <span className="text-sm font-bold text-purple-700">🔀 OPTIONS (Choose ONE to satisfy this task)</span>
                                     <button
@@ -463,7 +456,7 @@ const AddShiftModal = ({ isOpen, onClose, onAdd, initialData = null }) => {
                                         </div>
 
                                         {/* Requirements (AND Logic) */}
-                                        <div className="ml-6 space-y-2">
+                                        <div className="ml-2 sm:ml-6 space-y-2">
                                             <div className="flex justify-between items-center">
                                                 <span className="text-xs font-bold text-orange-700">⚡ REQUIREMENTS (ALL must be met)</span>
                                                 <button

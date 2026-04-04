@@ -6,16 +6,13 @@
  * Extracted from App.jsx for better modularity.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { CheckCircle, AlertCircle, X, Info } from 'lucide-react';
 
 const TOAST_DURATION = 5000; // 5 seconds
 
 const ToastNotification = ({ toast, onDismiss }) => {
-    const [isVisible, setIsVisible] = useState(false);
-    const [progress, setProgress] = useState(100);
     const timerRef = useRef(null);
-    const intervalRef = useRef(null);
     const isParsingAlert = Boolean(
         toast &&
         toast.category === 'parsing' &&
@@ -28,39 +25,19 @@ const ToastNotification = ({ toast, onDismiss }) => {
 
     useEffect(() => {
         if (!toast) {
-            setIsVisible(false);
-            setProgress(100);
             return;
         }
 
-        // Slide in
-        requestAnimationFrame(() => setIsVisible(true));
-        setProgress(100);
-
         if (isPersistent) {
-            return () => {
-                clearTimeout(timerRef.current);
-                clearInterval(intervalRef.current);
-            };
+            return undefined;
         }
 
-        // Progress bar countdown
-        const startTime = Date.now();
-        intervalRef.current = setInterval(() => {
-            const elapsed = Date.now() - startTime;
-            const remaining = Math.max(0, 100 - (elapsed / TOAST_DURATION) * 100);
-            setProgress(remaining);
-        }, 50);
-
-        // Auto-dismiss
         timerRef.current = setTimeout(() => {
-            setIsVisible(false);
-            setTimeout(() => onDismiss(), 300); // Wait for animation
+            onDismiss();
         }, TOAST_DURATION);
 
         return () => {
             clearTimeout(timerRef.current);
-            clearInterval(intervalRef.current);
         };
     }, [toast, onDismiss, isPersistent]);
 
@@ -144,8 +121,7 @@ const ToastNotification = ({ toast, onDismiss }) => {
             id="toast-notification"
             role="alert"
             aria-live="assertive"
-            className={`fixed top-6 right-6 z-[100] ${widthClass} transition-all duration-300 ease-out ${isVisible ? 'translate-x-0 opacity-100' : 'translate-x-full opacity-0'
-                }`}
+            className={`fixed top-6 right-6 z-[100] ${widthClass} transition-all duration-300 ease-out translate-x-0 opacity-100`}
         >
             <div className={`${style.bg} ${style.text} rounded-2xl shadow-2xl border-2 ${style.border} overflow-hidden`}>
                 <div className={bodyClass}>
@@ -163,10 +139,7 @@ const ToastNotification = ({ toast, onDismiss }) => {
                         )}
                     </div>
                     <button
-                        onClick={() => {
-                            setIsVisible(false);
-                            setTimeout(() => onDismiss(), 300);
-                        }}
+                        onClick={onDismiss}
                         className={`flex-shrink-0 ${style.closeHover} rounded-full p-1 transition-colors`}
                         aria-label="Dismiss notification"
                     >
@@ -176,8 +149,8 @@ const ToastNotification = ({ toast, onDismiss }) => {
                 {!isPersistent && (
                     <div className="h-1 bg-white/20">
                         <div
-                            className={`h-full ${style.progressBg} transition-all ease-linear`}
-                            style={{ width: `${progress}%`, transitionDuration: '50ms' }}
+                            className={`h-full ${style.progressBg}`}
+                            style={{ width: '100%', animation: `toast-progress ${TOAST_DURATION}ms linear forwards` }}
                         />
                     </div>
                 )}
