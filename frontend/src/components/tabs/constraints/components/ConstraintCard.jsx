@@ -7,7 +7,8 @@
 import React, { useCallback } from 'react';
 import { Trash2, RefreshCw, Save, CheckCircle2, AlertCircle } from 'lucide-react';
 import {
-    normalizeConstraintStrictness,
+    getAllowedConstraintStrictness,
+    isSoftOnlyConstraintType,
     normalizeParamsForStrictness,
 } from '../utils/constraintHelpers';
 import SchemaFormField from './SchemaFormField';
@@ -47,13 +48,14 @@ const ConstraintCard = React.memo(({
     }, [instance, onChange]);
 
     const updateStrictness = useCallback((newType) => {
+        const nextType = getAllowedConstraintStrictness(instance.typeKey, newType, 'SOFT');
         const updated = {
             ...instance,
-            type: newType,
+            type: nextType,
             params: normalizeParamsForStrictness({
                 params: instance.params,
                 schema,
-                nextType: newType,
+                nextType,
             }),
         };
         onChange(updated);
@@ -69,11 +71,13 @@ const ConstraintCard = React.memo(({
             ? `Pair: ${workerAName} + ${workerBName}`
             : schema?.label || instance.typeKey);
 
-    const displayStrictness = normalizeConstraintStrictness(
+    const displayStrictness = getAllowedConstraintStrictness(
+        instance.typeKey,
         instance.type ?? instance.params?.strictness,
         'SOFT'
     );
     const isHard = displayStrictness === 'HARD';
+    const isSoftOnlyConstraint = isSoftOnlyConstraintType(instance.typeKey);
 
     return (
         <div className={`p-4 rounded-lg border-2 transition-all ${
@@ -94,12 +98,15 @@ const ConstraintCard = React.memo(({
                             <select
                                 value={displayStrictness}
                                 onChange={(e) => updateStrictness(e.target.value)}
-                                className={`px-2 py-0.5 rounded-lg text-xs font-bold border cursor-pointer ${
+                                disabled={isSoftOnlyConstraint}
+                                className={`px-2 py-0.5 rounded-lg text-xs font-bold border ${
+                                    isSoftOnlyConstraint ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'
+                                } ${
                                     isHard
                                         ? 'bg-red-100 text-red-800 border-red-300 hover:bg-red-200'
                                         : 'bg-yellow-100 text-yellow-800 border-yellow-300 hover:bg-yellow-200'
                                 }`}
-                                title="Constraint strictness"
+                                title={isSoftOnlyConstraint ? 'Preferences are always soft constraints' : 'Constraint strictness'}
                             >
                                 <option value="HARD">HARD</option>
                                 <option value="SOFT">SOFT</option>
@@ -108,6 +115,11 @@ const ConstraintCard = React.memo(({
                         </div>
                         {schema?.description && (
                             <p className="text-sm text-gray-500 mt-0.5">{schema.description}</p>
+                        )}
+                        {isSoftOnlyConstraint && (
+                            <p className="mt-1 text-xs text-cyan-700">
+                                Preferences are always soft constraints.
+                            </p>
                         )}
                     </div>
                 </div>

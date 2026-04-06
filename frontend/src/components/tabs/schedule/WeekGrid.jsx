@@ -30,7 +30,7 @@ const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'F
 const WeekGrid = ({ assignmentsByDay, onShiftClick, workers = [] }) => {
     return (
         <div className="overflow-x-auto overscroll-x-contain -mx-2 px-2 pb-2 sm:mx-0 sm:px-0">
-            <div className="grid grid-cols-7 gap-2 sm:gap-3 min-w-[700px] min-h-[400px] sm:min-h-[500px]">
+            <div className="grid grid-cols-7 gap-2 sm:gap-3 min-w-[980px] min-h-[400px] sm:min-h-[500px]">
                 {DAYS_OF_WEEK.map((day) => {
                     const shiftsForDay = assignmentsByDay[day] || {};
                     const shiftGroups = Object.values(shiftsForDay);

@@ -2,8 +2,9 @@
 // SCORE INDICATOR - Visual score badges
 // ========================================
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { formatDiagnosticMessage } from '../../../utils/displayFormatting';
+import useTooltipPosition from '../../../help/tour/useTooltipPosition';
 
 /**
  * ScoreIndicator Component
@@ -22,6 +23,8 @@ import { formatDiagnosticMessage } from '../../../utils/displayFormatting';
  */
 const ScoreIndicator = ({ score, breakdown, globalViolations = [], employees = [] }) => {
     const [showTooltip, setShowTooltip] = useState(false);
+    const wrapperRef = useRef(null);
+    const triggerRef = useRef(null);
 
     const normalizedGlobalViolations = Array.isArray(globalViolations)
         ? globalViolations
@@ -69,20 +72,58 @@ const ScoreIndicator = ({ score, breakdown, globalViolations = [], employees = [
     }
 
     const showBreakdownTooltip = showTooltip && tooltipLines.length > 0;
+    const { top, left, setCardRef } = useTooltipPosition(triggerRef.current, 'top', showBreakdownTooltip);
+
+    useEffect(() => {
+        if (!showBreakdownTooltip) return;
+
+        const onClickOutside = (event) => {
+            if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+                setShowTooltip(false);
+            }
+        };
+
+        const onKeyDown = (event) => {
+            if (event.key === 'Escape') {
+                setShowTooltip(false);
+            }
+        };
+
+        document.addEventListener('mousedown', onClickOutside);
+        document.addEventListener('keydown', onKeyDown);
+
+        return () => {
+            document.removeEventListener('mousedown', onClickOutside);
+            document.removeEventListener('keydown', onKeyDown);
+        };
+    }, [showBreakdownTooltip]);
 
     return (
-        <div className="relative inline-block">
-            <span
+        <div
+            ref={wrapperRef}
+            className="relative inline-block"
+            onMouseEnter={() => setShowTooltip(true)}
+            onMouseLeave={() => setShowTooltip(false)}
+        >
+            <button
+                ref={triggerRef}
+                type="button"
                 className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold border cursor-help transition-all ${bgColor} ${textColor}`}
-                onMouseEnter={() => setShowTooltip(true)}
-                onMouseLeave={() => setShowTooltip(false)}
+                onClick={() => setShowTooltip((prev) => !prev)}
+                aria-expanded={showBreakdownTooltip}
+                aria-label={`Score breakdown ${formatScore(score)}`}
             >
                 {formatScore(score)}
-            </span>
+            </button>
 
             {/* Tooltip */}
             {showBreakdownTooltip && (
-                <div className="absolute z-50 bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg shadow-xl min-w-[220px] max-w-[320px]">
+                <div
+                    ref={setCardRef}
+                    className="fixed z-50 w-[min(20rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] px-3 py-2 bg-gray-900 text-white text-xs rounded-lg shadow-xl"
+                    style={{ top: `${top}px`, left: `${left}px` }}
+                    role="tooltip"
+                >
                     <div className="font-bold mb-1">Score Breakdown</div>
                     <div className="space-y-1">
                         {tooltipLines.map((line, idx) => (
@@ -91,8 +132,6 @@ const ScoreIndicator = ({ score, breakdown, globalViolations = [], employees = [
                             </div>
                         ))}
                     </div>
-                    {/* Arrow */}
-                    <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900" />
                 </div>
             )}
         </div>

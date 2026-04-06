@@ -20,10 +20,6 @@ from domain.worker_model import Worker
 from domain.shift_model import Shift, TimeWindow
 from domain.task_model import Task, TaskOption
 from repositories.interfaces import IWorkerRepository, IShiftRepository
-from solver.constraints.registry import ConstraintRegistry
-from solver.constraints.base import ConstraintType
-from solver.constraints.dynamic import MutualExclusionConstraint, CoLocationConstraint
-from solver.constraints.static_soft import WorkerPreferencesConstraint
 
 # Canonical Week Date Normalization
 from app.utils.date_normalization import (
@@ -86,51 +82,8 @@ class ExcelParser:
         self.start_date: Optional[datetime] = None
         self._raw_constraints: List[Dict] = []  # Raw constraint rows from Excel
         # Non-fatal warnings collected during parsing (availability failures,
-        # empty sheets, etc.).  Callers should read this after load_from_file().
+        # empty sheets, etc.).  Callers should read this after load_from_frames().
         self._warnings: List[str] = []
-
-    def load_from_file(self, file_path: str, start_date: Optional[datetime] = None) -> None:
-        """
-        Main entry point. Reads the file and populates the repositories.
-
-        CANONICAL WEEK ENFORCEMENT: The start_date parameter is ignored.
-        All dates are normalized to the Canonical Epoch Week (Jan 1-7, 2024)
-        to prevent Date Drift bugs.
-        """
-        self.file_path = file_path
-        # Always use Canonical Sunday, ignore any provided start_date
-        self.start_date = self._get_canonical_sunday()
-        self._raw_constraints = []  # Reset constraints
-        self._warnings = []  # Reset warnings
-        logger.info(f"Using Canonical Epoch Week for import (start: {self.start_date.date()})")
-
-        try:
-            logger.info(f"Parsing data from: {self.file_path}")
-            xls = pd.ExcelFile(self.file_path)
-
-            # 1. Parse & Save Workers
-            if 'Workers' in xls.sheet_names:
-                df_workers = pd.read_excel(xls, 'Workers')
-                self._process_workers(df_workers)
-            else:
-                raise ValueError("Missing 'Workers' sheet.")
-
-            # 2. Parse & Save Shifts
-            if 'Shifts' in xls.sheet_names:
-                df_shifts = pd.read_excel(xls, 'Shifts')
-                self._process_shifts(df_shifts)
-            else:
-                raise ValueError("Missing 'Shifts' sheet.")
-
-            # 3. Parse Constraints (Stored internally to build Registry later)
-            if 'Constraints' in xls.sheet_names:
-                self._parse_raw_constraints(pd.read_excel(xls, 'Constraints'))
-
-            logger.info("Parsing complete. Data loaded into repositories.")
-
-        except Exception as e:
-            logger.error(f"Parsing error: {e}", exc_info=True)
-            raise
 
     def load_from_frames(
         self,
@@ -140,16 +93,16 @@ class ExcelParser:
         """Load data from pre-parsed DataFrames (skips file I/O).
 
         Accepts the same ``sheet_frames`` dict returned by
-        ``WorkbookValidator.validate()``.  Delegates to the same
+        ``WorkbookValidator.validate()``.  Delegates to
         ``_process_workers()``, ``_process_shifts()``, and
-        ``_parse_raw_constraints()`` methods used by ``load_from_file()``.
+        ``_parse_raw_constraints()``.
 
         Args:
             sheet_frames: Dict mapping sheet names to DataFrames.
                 Must contain ``'Workers'`` and ``'Shifts'`` keys.
                 ``'Constraints'`` key is optional.
-            session_id: Optional session ID (unused, for interface symmetry
-                with ``load_from_file``).
+            session_id: Optional session ID (unused, kept for interface
+                compatibility).
 
         Raises:
             ValueError: If the required ``'Workers'`` or ``'Shifts'``
@@ -177,33 +130,6 @@ class ExcelParser:
             self._parse_raw_constraints(sheet_frames['Constraints'])
 
         logger.info("In-memory parsing complete. Data loaded into repositories.")
-
-    def get_constraint_registry(self) -> ConstraintRegistry:
-        """Builds and returns the constraint registry based on parsed data."""
-        # Start with built-in constraints (coverage, max hours, etc.)
-        registry = ConstraintRegistry()
-        registry.add_core_constraints()
-        # Always include the worker preferences constraint so '*'/'!' markers
-        # from availability cells are applied as soft scoring penalties
-        registry.register(WorkerPreferencesConstraint())
-
-        # Iterate over raw constraint rows from the Excel Constraints sheet
-        for row in self._raw_constraints:
-            ctype = row.get('Type', '').strip()
-            # Map "Hard"/"Soft" text from Excel to the ConstraintType enum
-            strict = ConstraintType.HARD if row.get('Strictness', 'Hard').lower() == 'hard' else ConstraintType.SOFT
-            subj = row.get('Subject', '').strip()  # Worker A identifier
-            trgt = row.get('Target', '').strip()   # Worker B identifier
-
-            # Register dynamic per-worker-pair constraints
-            if ctype == 'Mutual Exclusion' and subj and trgt:
-                # "These two workers must NOT be scheduled in the same shift"
-                registry.register(MutualExclusionConstraint(subj, trgt, strict))
-            elif ctype == 'Co-Location' and subj and trgt:
-                # "These two workers MUST be scheduled in the same shift"
-                registry.register(CoLocationConstraint(subj, trgt, strict))
-
-        return registry
 
     # --- Internal Parsing Logic ---
 

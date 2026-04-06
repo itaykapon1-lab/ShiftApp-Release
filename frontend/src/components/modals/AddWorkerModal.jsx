@@ -132,29 +132,31 @@ const AddWorkerModal = ({ isOpen, onClose, onAdd, initialData = null }) => {
                 {/* Skills */}
                 <div className="border-2 border-indigo-200 rounded-lg p-4 bg-indigo-50">
                     <label className="block text-sm font-bold text-gray-700 mb-3">Skills (Name + Level 1-10)</label>
-                    <div className="flex gap-2 mb-3">
+                    <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
                         <input
                             type="text"
                             value={newSkillName}
                             onChange={(e) => setNewSkillName(e.target.value)}
                             onKeyPress={(e) => e.key === 'Enter' && handleAddSkill()}
                             placeholder="Chef"
-                            className="flex-1 px-3 py-2 border rounded-lg outline-none"
+                            className="w-full min-w-0 px-3 py-2 border rounded-lg outline-none sm:flex-1"
                         />
-                        <input
-                            type="number"
-                            min="1"
-                            max="10"
-                            value={newSkillLevel}
-                            onChange={(e) => setNewSkillLevel(parseInt(e.target.value))}
-                            className="w-24 px-3 py-2 border rounded-lg outline-none text-center font-bold"
-                        />
-                        <button
-                            onClick={handleAddSkill}
-                            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium"
-                        >
-                            <Plus className="w-4 h-4" />
-                        </button>
+                        <div className="grid grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
+                            <input
+                                type="number"
+                                min="1"
+                                max="10"
+                                value={newSkillLevel}
+                                onChange={(e) => setNewSkillLevel(parseInt(e.target.value))}
+                                className="w-full px-3 py-2 border rounded-lg outline-none text-center font-bold sm:w-24"
+                            />
+                            <button
+                                onClick={handleAddSkill}
+                                className="inline-flex w-full items-center justify-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium sm:w-auto"
+                            >
+                                <Plus className="w-4 h-4" />
+                            </button>
+                        </div>
                     </div>
                     <div className="space-y-2 max-h-40 overflow-y-auto">
                         {Object.entries(skills).map(([skill, level]) => (

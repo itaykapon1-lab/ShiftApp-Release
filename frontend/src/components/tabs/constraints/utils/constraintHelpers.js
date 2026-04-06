@@ -7,6 +7,22 @@
 
 export const DEFAULT_SOFT_PENALTY = -10;
 export const STRESS_SEED = 20260215;
+export const SOFT_ONLY_CONSTRAINT_TYPE_KEYS = new Set([
+    'worker_preferences',
+    'task_option_priority',
+    'task_preferences',
+]);
+
+export function isSoftOnlyConstraintType(typeKey) {
+    return SOFT_ONLY_CONSTRAINT_TYPE_KEYS.has(String(typeKey ?? '').trim().toLowerCase());
+}
+
+export function getAllowedConstraintStrictness(typeKey, requestedType, fallback = 'SOFT') {
+    if (isSoftOnlyConstraintType(typeKey)) {
+        return 'SOFT';
+    }
+    return normalizeConstraintStrictness(requestedType, fallback);
+}
 
 export function normalizeConstraintStrictness(value, fallback = 'SOFT') {
     const normalized = String(value ?? '').trim().toLowerCase();
@@ -47,14 +63,20 @@ export function schemaHasField(schema, fieldName) {
  * @returns {Object} Normalized parameter object
  */
 export function normalizeParamsForStrictness({ params, schema, nextType }) {
-    const normalizedType = nextType === 'HARD' ? 'HARD' : 'SOFT';
+    const normalizedType = getAllowedConstraintStrictness(
+        schema?.key ?? schema?.category,
+        nextType,
+        'SOFT'
+    );
     const nextParams = { ...(params || {}) };
+    const hasStrictnessParam = Object.prototype.hasOwnProperty.call(nextParams, 'strictness');
+    const hasPenaltyParam = Object.prototype.hasOwnProperty.call(nextParams, 'penalty');
 
-    if (schemaHasField(schema, 'strictness')) {
+    if (schemaHasField(schema, 'strictness') || hasStrictnessParam) {
         nextParams.strictness = normalizedType;
     }
 
-    if (schemaHasField(schema, 'penalty')) {
+    if (schemaHasField(schema, 'penalty') || hasPenaltyParam) {
         if (normalizedType === 'HARD') {
             nextParams.penalty = 0;
         } else {
@@ -145,7 +167,7 @@ export function toInstance(constraint, idx) {
         enabled: constraint.enabled !== false,
         name: constraint.name,
         description: constraint.description,
-        type: constraint.type,
+        type: isSoftOnlyConstraintType(typeKey) ? 'SOFT' : constraint.type,
     };
 }
 
@@ -156,14 +178,22 @@ export function toInstance(constraint, idx) {
  * @returns {Object} API constraint object
  */
 export function toApiConstraint(inst) {
+    const isSoftOnly = isSoftOnlyConstraintType(inst.typeKey);
+    const type = isSoftOnly ? 'SOFT' : (inst.type || 'SOFT');
     return {
         id: inst.backendId,
         category: inst.typeKey,
-        type: inst.type || 'SOFT',
+        type,
         enabled: inst.enabled !== false,
         name: inst.name,
         description: inst.description,
-        params: inst.params ? { ...inst.params } : {},
+        params: isSoftOnly
+            ? normalizeParamsForStrictness({
+                params: inst.params ? { ...inst.params } : {},
+                schema: { key: inst.typeKey, fields: [] },
+                nextType: type,
+            })
+            : (inst.params ? { ...inst.params } : {}),
     };
 }
 

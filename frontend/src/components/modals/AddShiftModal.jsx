@@ -104,29 +104,31 @@ const SkillBuilder = ({ skills, onAddSkill, onRemoveSkill }) => {
             </div>
 
             {/* Add New Skill */}
-            <div className="flex gap-1">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <input
                     type="text"
                     value={newSkillName}
                     onChange={(e) => setNewSkillName(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && handleAdd()}
                     placeholder="Skill (e.g., Waiter)"
-                    className="flex-1 px-2 py-1 border rounded text-xs"
+                    className="w-full min-w-0 px-2 py-1 border rounded text-xs sm:flex-1"
                 />
-                <input
-                    type="number"
-                    min="1"
-                    max="10"
-                    value={newSkillLevel}
-                    onChange={(e) => setNewSkillLevel(parseInt(e.target.value))}
-                    className="w-12 px-1 py-1 border rounded text-xs text-center font-bold"
-                />
-                <button
-                    onClick={handleAdd}
-                    className="px-2 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700"
-                >
-                    <Plus className="w-3 h-3" />
-                </button>
+                <div className="grid grid-cols-2 gap-2 sm:flex sm:w-auto sm:items-center">
+                    <input
+                        type="number"
+                        min="1"
+                        max="10"
+                        value={newSkillLevel}
+                        onChange={(e) => setNewSkillLevel(parseInt(e.target.value))}
+                        className="w-full px-2 py-1 border rounded text-xs text-center font-bold sm:w-12 sm:px-1"
+                    />
+                    <button
+                        onClick={handleAdd}
+                        className="inline-flex w-full items-center justify-center px-2 py-1 bg-blue-600 text-white rounded text-xs hover:bg-blue-700 sm:w-auto"
+                    >
+                        <Plus className="w-3 h-3" />
+                    </button>
+                </div>
             </div>
         </div>
     );
@@ -407,12 +409,12 @@ const AddShiftModal = ({ isOpen, onClose, onAdd, initialData = null }) => {
                             </div>
 
                             {/* Options (OR Logic) */}
-                            <div className="ml-3 sm:ml-8 space-y-3">
-                                <div className="flex justify-between items-center">
+                            <div className="ml-0 space-y-3 sm:ml-8">
+                                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                     <span className="text-sm font-bold text-purple-700">🔀 OPTIONS (Choose ONE to satisfy this task)</span>
                                     <button
                                         onClick={() => addOption(taskIdx)}
-                                        className="px-2 py-1 bg-purple-600 text-white rounded text-xs hover:bg-purple-700 font-bold"
+                                        className="inline-flex items-center justify-center self-start px-2 py-1 bg-purple-600 text-white rounded text-xs hover:bg-purple-700 font-bold"
                                     >
                                         <Plus className="w-3 h-3 inline mr-1" /> Add Option
                                     </button>
@@ -421,9 +423,9 @@ const AddShiftModal = ({ isOpen, onClose, onAdd, initialData = null }) => {
                                 {task.options.map((option, optIdx) => (
                                     <div key={optIdx} className="border-2 border-purple-300 rounded-lg p-3 bg-purple-50">
                                         {/* Option Header */}
-                                        <div className="flex justify-between items-center mb-2">
+                                        <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                             <span className="font-bold text-purple-900">Option {String.fromCharCode(65 + optIdx)}</span>
-                                            <div className="flex items-center gap-2">
+                                            <div className="flex flex-wrap items-center gap-2">
                                                 {task.options.length > 1 && (
                                                     <div className="flex items-center gap-1">
                                                         <label
@@ -456,12 +458,12 @@ const AddShiftModal = ({ isOpen, onClose, onAdd, initialData = null }) => {
                                         </div>
 
                                         {/* Requirements (AND Logic) */}
-                                        <div className="ml-2 sm:ml-6 space-y-2">
-                                            <div className="flex justify-between items-center">
+                                        <div className="ml-0 space-y-2 sm:ml-6">
+                                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                                                 <span className="text-xs font-bold text-orange-700">⚡ REQUIREMENTS (ALL must be met)</span>
                                                 <button
                                                     onClick={() => addRequirement(taskIdx, optIdx)}
-                                                    className="px-2 py-1 bg-orange-500 text-white rounded text-xs hover:bg-orange-600"
+                                                    className="inline-flex items-center justify-center self-start px-2 py-1 bg-orange-500 text-white rounded text-xs hover:bg-orange-600"
                                                 >
                                                     <Plus className="w-3 h-3 inline" />
                                                 </button>
@@ -470,19 +472,29 @@ const AddShiftModal = ({ isOpen, onClose, onAdd, initialData = null }) => {
                                             {option.requirements.map((req, reqIdx) => (
                                                 <div key={reqIdx} className="border-2 border-orange-300 rounded-lg p-2 bg-orange-50">
                                                     {/* Requirement: Count + Skills */}
-                                                    <div className="flex items-start gap-2">
-                                                        <div className="flex-shrink-0">
-                                                            <label className="block text-xs font-bold text-gray-700 mb-1">Count</label>
-                                                            <input
-                                                                type="number"
-                                                                min="1"
-                                                                value={req.count}
-                                                                onChange={(e) => updateRequirementCount(taskIdx, optIdx, reqIdx, e.target.value)}
-                                                                className="w-16 px-2 py-1 border-2 border-orange-400 rounded text-center font-bold"
-                                                            />
+                                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                                                        <div className="flex items-end justify-between gap-2 sm:block sm:flex-shrink-0">
+                                                            <div className="w-full sm:w-auto">
+                                                                <label className="block text-xs font-bold text-gray-700 mb-1">Count</label>
+                                                                <input
+                                                                    type="number"
+                                                                    min="1"
+                                                                    value={req.count}
+                                                                    onChange={(e) => updateRequirementCount(taskIdx, optIdx, reqIdx, e.target.value)}
+                                                                    className="w-full px-2 py-1 border-2 border-orange-400 rounded text-center font-bold sm:w-16"
+                                                                />
+                                                            </div>
+                                                            {option.requirements.length > 1 && (
+                                                                <button
+                                                                    onClick={() => removeRequirement(taskIdx, optIdx, reqIdx)}
+                                                                    className="text-red-600 hover:bg-red-100 p-1 rounded sm:mt-5"
+                                                                >
+                                                                    <Trash2 className="w-4 h-4" />
+                                                                </button>
+                                                            )}
                                                         </div>
 
-                                                        <div className="flex-1">
+                                                        <div className="flex-1 min-w-0">
                                                             <label className="block text-xs font-bold text-gray-700 mb-1">Skills (Name + Min Level)</label>
                                                             <SkillBuilder
                                                                 skills={req.required_skills}
@@ -491,14 +503,6 @@ const AddShiftModal = ({ isOpen, onClose, onAdd, initialData = null }) => {
                                                             />
                                                         </div>
 
-                                                        {option.requirements.length > 1 && (
-                                                            <button
-                                                                onClick={() => removeRequirement(taskIdx, optIdx, reqIdx)}
-                                                                className="text-red-600 hover:bg-red-100 p-1 rounded mt-5"
-                                                            >
-                                                                <Trash2 className="w-4 h-4" />
-                                                            </button>
-                                                        )}
                                                     </div>
                                                 </div>
                                             ))}

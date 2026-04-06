@@ -1,18 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Info } from 'lucide-react';
 import { useHelp } from '../context';
-
-const placementClasses = {
-    top: 'bottom-full mb-2 left-1/2 -translate-x-1/2',
-    bottom: 'top-full mt-2 left-1/2 -translate-x-1/2',
-    left: 'right-full mr-2 top-1/2 -translate-y-1/2',
-    right: 'left-full ml-2 top-1/2 -translate-y-1/2',
-};
+import useTooltipPosition from '../tour/useTooltipPosition';
 
 const HelpPopover = ({ hintId, title, content, placement = 'top' }) => {
     const [isOpen, setIsOpen] = useState(false);
     const wrapperRef = useRef(null);
+    const triggerRef = useRef(null);
     const { getGlossaryTerm } = useHelp();
+    const { top, left, setCardRef } = useTooltipPosition(triggerRef.current, placement, isOpen);
 
     const resolved = useMemo(() => {
         if (title && content) return { title, content };
@@ -27,8 +23,20 @@ const HelpPopover = ({ hintId, title, content, placement = 'top' }) => {
                 setIsOpen(false);
             }
         };
+
+        const onKeyDown = (event) => {
+            if (event.key === 'Escape') {
+                setIsOpen(false);
+            }
+        };
+
         document.addEventListener('mousedown', onClickOutside);
-        return () => document.removeEventListener('mousedown', onClickOutside);
+        document.addEventListener('keydown', onKeyDown);
+
+        return () => {
+            document.removeEventListener('mousedown', onClickOutside);
+            document.removeEventListener('keydown', onKeyDown);
+        };
     }, []);
 
     if (!resolved) return null;
@@ -37,15 +45,19 @@ const HelpPopover = ({ hintId, title, content, placement = 'top' }) => {
         <span className="relative inline-flex" ref={wrapperRef}>
             <button
                 type="button"
+                ref={triggerRef}
                 onClick={() => setIsOpen((prev) => !prev)}
                 className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors"
                 aria-label={`Help for ${resolved.title}`}
+                aria-expanded={isOpen}
             >
                 <Info className="w-3.5 h-3.5" />
             </button>
             {isOpen && (
                 <div
-                    className={`absolute z-50 ${placementClasses[placement] || placementClasses.top} w-72 max-w-[80vw] bg-gray-900 text-white rounded-lg shadow-2xl px-3 py-2`}
+                    ref={setCardRef}
+                    className="fixed z-50 w-[min(18rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] bg-gray-900 text-white rounded-lg shadow-2xl px-3 py-2"
+                    style={{ top: `${top}px`, left: `${left}px` }}
                     role="tooltip"
                 >
                     <div className="text-xs font-bold text-white mb-1">{resolved.title}</div>

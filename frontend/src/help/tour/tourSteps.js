@@ -424,7 +424,7 @@ const tourSteps = [
         title: 'Hard vs Soft Constraints',
         body: 'When adding a constraint, you choose its strictness:\n\n\u2022 Hard — must be satisfied. Violating even one makes the entire schedule infeasible.\n\u2022 Soft — adds a penalty score when broken, but won\'t block a solution.\n\nSolver Goal: The algorithm\'s primary objective is to find a valid schedule that MINIMIZES the total penalty score across all soft constraints. Lower total penalty = better schedule.',
         tip: 'Start with Soft constraints when experimenting. Switch to Hard once you\'re confident the schedule can satisfy them.',
-        targetSelector: 'select[aria-label="Constraint strictness"]',
+        targetSelector: '#constraints-add-trigger',
         placement: 'bottom',
         advanceOn: 'manual',
         advanceCondition: null,
@@ -505,7 +505,7 @@ const tourSteps = [
         phase: 'SOLVER',
         title: 'Run the Solver',
         body: 'Time to generate a schedule! Click "Run Solver" to send your data to the optimization engine. It will satisfy all hard constraints and minimize the total penalty from soft constraints to produce the best possible schedule.',
-        tip: 'The solver uses Google OR-Tools CP-SAT under the hood — it finds the mathematically optimal assignment that minimizes total penalty.',
+        tip: 'The solver uses Google OR-Tools milp under the hood — it finds the mathematically optimal assignment that minimizes total penalty.',
         targetSelector: '#btn-run-solver',
         placement: 'bottom',
         advanceOn: 'click',
@@ -553,7 +553,7 @@ const tourSteps = [
         phase: 'SOLVER',
         title: 'Reading the Results',
         body: 'The schedule grid shows which workers are assigned to which shifts. If the solver found an optimal solution, you\'ll see assignment cards. If it was infeasible, a diagnostics panel explains which constraints conflicted.',
-        tip: 'The objective score reflects the total penalty — lower means fewer soft constraints were broken. A score of 0 means a perfect schedule.',
+        tip: 'The objective score reflects the total penalty — lower means many soft constraints were broken.',
         targetSelector: null,
         targetFinder: () => {
             // Target the schedule tab content area

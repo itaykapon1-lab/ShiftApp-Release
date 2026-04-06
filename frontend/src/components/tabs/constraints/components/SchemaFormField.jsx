@@ -15,9 +15,10 @@ import WorkerSelect from './WorkerSelect';
  * @param {function} props.onChange - Callback when value changes
  * @param {Object[]} props.workers - Available workers (for worker_select widget)
  * @param {string} [props.error] - Validation error message
+ * @param {string} [props.idPrefix='field'] - Optional prefix for generated input ids
  */
-const SchemaFormField = React.memo(({ field, value, onChange, workers, error }) => {
-    const id = `field-${field.name}`;
+const SchemaFormField = React.memo(({ field, value, onChange, workers, error, idPrefix = 'field' }) => {
+    const id = `${idPrefix}-${field.name}`;
 
     if (field.widget === 'worker_select') {
         return (

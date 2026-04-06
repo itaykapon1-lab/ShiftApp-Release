@@ -25,6 +25,7 @@ import {
 } from './utils/constraintHelpers';
 import AddConstraintPanel from './components/AddConstraintPanel';
 import ConstraintCard from './components/ConstraintCard';
+import AddConstraintModal from '../../modals/AddConstraintModal';
 
 function normalizeSchemaResponse(payload) {
     if (Array.isArray(payload)) return payload;
@@ -50,6 +51,7 @@ const ConstraintsTab = ({ constraints: propConstraints, onConstraintsReplace, wo
     const [errorMapByInstanceId, setErrorMapByInstanceId] = useState({});
     const [saveStateByInstanceId, setSaveStateByInstanceId] = useState({});
     const [savedSnapshotById, setSavedSnapshotById] = useState({});
+    const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
     // BUG 3 FIX: Ref to current instances for callbacks that need the value
     // without adding it to the dependency array (keeps callbacks stable)
@@ -105,7 +107,12 @@ const ConstraintsTab = ({ constraints: propConstraints, onConstraintsReplace, wo
     }, [instances, savedSnapshotById]);
 
     const saveConstraints = useCallback(async (insts, sourceInstanceId) => {
-        if (!sourceInstanceId) return;
+        if (!sourceInstanceId) {
+            return {
+                ok: false,
+                message: 'Missing constraint save target.',
+            };
+        }
 
         // BUG 1 FIX: Add to saving set instead of replacing single ID
         setSavingInstanceIds(prev => new Set(prev).add(sourceInstanceId));
@@ -143,14 +150,15 @@ const ConstraintsTab = ({ constraints: propConstraints, onConstraintsReplace, wo
                 ...prev,
                 [sourceInstanceId]: { status: 'success', message: 'Saved' },
             }));
+            return { ok: true };
         } catch (err) {
             if (!mountedRef.current) return;
 
             const detail = err?.data?.detail;
             if (err?.status === 422 && Array.isArray(detail)) {
                 const errorMapById = buildErrorMap(insts, detail);
-                setErrorMapByInstanceId(errorMapById);
                 const firstFieldError = Object.values(errorMapById[sourceInstanceId] || {})[0];
+                setErrorMapByInstanceId(errorMapById);
                 setSaveStateByInstanceId(prev => ({
                     ...prev,
                     [sourceInstanceId]: {
@@ -158,6 +166,10 @@ const ConstraintsTab = ({ constraints: propConstraints, onConstraintsReplace, wo
                         message: firstFieldError || 'Validation failed. Please complete required fields.',
                     },
                 }));
+                return {
+                    ok: false,
+                    message: firstFieldError || 'Validation failed. Please complete required fields.',
+                };
             } else {
                 setError(`Failed to save: ${err.message}`);
                 setSaveStateByInstanceId(prev => ({
@@ -167,6 +179,10 @@ const ConstraintsTab = ({ constraints: propConstraints, onConstraintsReplace, wo
                         message: err?.message || 'Failed to save constraint',
                     },
                 }));
+                return {
+                    ok: false,
+                    message: err?.message || 'Failed to save constraint',
+                };
             }
         } finally {
             if (mountedRef.current) {
@@ -188,6 +204,40 @@ const ConstraintsTab = ({ constraints: propConstraints, onConstraintsReplace, wo
             [inst.id]: { status: 'idle', message: '' },
         }));
     }, []);
+
+    const handleAddAndSave = useCallback(async (inst) => {
+        const nextInstances = [...instancesRef.current, inst];
+
+        setInstances(nextInstances);
+        setErrorMapByInstanceId(prev => ({
+            ...prev,
+            [inst.id]: {},
+        }));
+        setSaveStateByInstanceId(prev => ({
+            ...prev,
+            [inst.id]: { status: 'idle', message: '' },
+        }));
+
+        const result = await saveConstraints(nextInstances, inst.id);
+
+        if (!result?.ok && mountedRef.current) {
+            setInstances(prev => prev.filter((item) => item.id !== inst.id));
+            setErrorMapByInstanceId(prev => {
+                const { [inst.id]: _removed, ...rest } = prev;
+                return rest;
+            });
+            setSaveStateByInstanceId(prev => {
+                const { [inst.id]: _removed, ...rest } = prev;
+                return rest;
+            });
+            setSavedSnapshotById(prev => {
+                const { [inst.id]: _removed, ...rest } = prev;
+                return rest;
+            });
+        }
+
+        return result;
+    }, [saveConstraints]);
 
     const handleUpdate = useCallback((updated) => {
         setInstances(prev => prev.map(i => i.id === updated.id ? updated : i));
@@ -345,7 +395,14 @@ const ConstraintsTab = ({ constraints: propConstraints, onConstraintsReplace, wo
                 </div>
             )}
 
-            <AddConstraintPanel schemas={schemas} onAdd={handleAdd} />
+            <AddConstraintPanel schemas={schemas} onOpen={() => setIsAddModalOpen(true)} />
+            <AddConstraintModal
+                isOpen={isAddModalOpen}
+                onClose={() => setIsAddModalOpen(false)}
+                onAdd={handleAddAndSave}
+                schemas={schemas}
+                workers={workers}
+            />
 
             <div className="bg-white p-6 rounded-xl border-2 border-gray-200 shadow-lg">
                 <div className="flex justify-between items-center mb-4">

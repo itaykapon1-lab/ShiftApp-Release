@@ -396,7 +396,8 @@ ShiftApp/
 │   │   ├── session_routes.py
 │   │   └── helpers.py
 │   ├── deps.py                     # Dependency injection (DB session, repos)
-│   └── routes.py                   # Central router aggregation
+│   ├── routes.py                   # Central router aggregation
+│   └── routes_constraints_schema.py # Constraint schema endpoint
 ├── app/                            # FastAPI application core
 │   ├── core/
 │   │   ├── config.py               # Pydantic Settings — all env vars, validation
@@ -407,15 +408,16 @@ ShiftApp/
 │   │   └── exceptions.py           # Custom exception hierarchy
 │   ├── db/session.py               # Engine creation, connection pooling
 │   ├── schemas/                    # Pydantic request/response models
+│   ├── services/
+│   │   └── constraint_schema_service.py  # Constraint UI schema generation
 │   ├── utils/
 │   │   ├── date_normalization.py   # Canonical epoch helpers
 │   │   └── result_formatter.py     # Solver output presentation
 │   └── main.py                     # FastAPI app, lifespan, middleware stack
 ├── data/                           # ORM models & data-layer utilities
 │   ├── models.py                   # SQLAlchemy ORM definitions
-│   ├── data_manager.py             # In-memory domain object manager
-│   ├── structures.py               # Shared data structures
-│   └── unit_of_work.py             # Transaction boundary management
+│   ├── base.py                     # Declarative base
+│   ├── ex_parser.py                # Excel parsing primitives
 ├── domain/                         # Pure dataclasses — zero I/O, zero dependencies
 │   ├── worker_model.py
 │   ├── shift_model.py
@@ -453,14 +455,31 @@ ShiftApp/
 │       ├── static_hard.py          # Coverage, exclusivity, overlap prevention
 │       ├── static_soft.py          # Max hours, preferences, consecutive shifts
 │       └── dynamic.py              # Mutual exclusion, co-location
-├── tests/                          # Test suite (unit, integration, E2E, chaos)
+├── tests/                          # 490+ tests (unit, integration, E2E, chaos, perf)
+│   ├── unit/                       # Pure logic tests (solver, domain, services, core)
+│   ├── integration/                # API contracts, DB roundtrips, Excel pipelines
+│   ├── e2e/                        # Full workflow journeys
+│   ├── chaos/                      # Concurrency, isolation, empty-input stress tests
+│   ├── performance/                # Timeout recovery, import benchmarks
+│   └── fixtures/                   # Shared factories and test builders
 ├── frontend/                       # React 19 + Vite 7 + Tailwind CSS
 │   ├── src/
 │   │   ├── api/                    # HTTP client + endpoint definitions
-│   │   ├── components/             # UI components (common, modals, tabs, constraints)
+│   │   ├── components/
+│   │   │   ├── common/             # Modal, ErrorBoundary, LoadingSpinner, Toast
+│   │   │   ├── modals/             # AddShiftModal, AddWorkerModal, AddConstraintModal
+│   │   │   └── tabs/
+│   │   │       ├── constraints/    # Constraint builder (cards, panels, schema fields)
+│   │   │       │   ├── components/ # AddConstraintPanel, ConstraintCard, SchemaFormField
+│   │   │       │   └── utils/      # constraintHelpers (serialization, dirty tracking)
+│   │   │       └── schedule/       # WeekGrid, ShiftCard, ScoreIndicator
 │   │   ├── help/                   # Guided tour engine + contextual help system
+│   │   │   ├── components/         # HelpButton, HelpModal, HelpPopover
+│   │   │   ├── tour/              # TourOverlay, TourCard, step definitions, hooks
+│   │   │   └── content/           # Glossary terms and help content
 │   │   ├── hooks/                  # Custom React hooks (poller, CRUD, solver lifecycle)
-│   │   └── utils/                  # Display formatting, constants
+│   │   ├── tests/                  # Frontend test suite (Vitest + Testing Library)
+│   │   ├── utils/                  # Display formatting, constants, error mapping
 │   ├── Dockerfile                  # Frontend container (nginx-based)
 │   └── nginx.conf                  # SPA rewrite rules + static asset serving
 ├── Caddyfile                       # Reverse proxy configuration

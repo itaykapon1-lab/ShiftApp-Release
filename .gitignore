@@ -82,3 +82,7 @@ tests/unit
 tests/integration
 scripts/*
 !scripts/init-db.sql
+
+# ===== Legacy / Dead Code Archive =====
+data/legacy_data/
+frontend/src/legacy_components/
